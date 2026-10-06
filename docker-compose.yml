@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Les trois services ci-dessous utilisent EXACTEMENT la même image
 # (build: ./nodes/node). Ce qui les différencie, c'est uniquement
 # leur configuration via variables d'environnement.
