@@ -1,0 +1,55 @@
+version: "3.9"
+
+# Les trois services ci-dessous utilisent EXACTEMENT la même image
+# (build: ./nodes/node). Ce qui les différencie, c'est uniquement
+# leur configuration via variables d'environnement.
+#
+# Ajouter un 4e ou 5e noeud pour une démo = ajouter un bloc de plus
+# ici, sans toucher au code.
+
+services:
+  node-a:
+    build:
+      context: ./nodes
+      dockerfile: node/Dockerfile
+    container_name: node-a
+    environment:
+      - NODE_ID=node-a
+      - NODE_PORT=50051
+      - PEERS=node-b:50052,node-c:50053
+    ports:
+      - "50051:50051"
+    networks:
+      - reseau-verification
+
+  node-b:
+    build:
+      context: ./nodes
+      dockerfile: node/Dockerfile
+    container_name: node-b
+    environment:
+      - NODE_ID=node-b
+      - NODE_PORT=50052
+      - PEERS=node-a:50051,node-c:50053
+    ports:
+      - "50052:50052"
+    networks:
+      - reseau-verification
+
+  node-c:
+    build:
+      context: ./nodes
+      dockerfile: node/Dockerfile
+    container_name: node-c
+    environment:
+      - NODE_ID=node-c
+      - NODE_PORT=50053
+      - PEERS=node-a:50051,node-b:50052
+    ports:
+      - "50053:50053"
+    networks:
+      - reseau-verification
+
+networks:
+  reseau-verification:
+    driver: bridge

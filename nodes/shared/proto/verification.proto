@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package verification;
+
+// Service exposé par chaque noeud pour vérifier une authentification
+service VerificationService {
+  // Récupère la donnée d'aide (fuzzy extractor) associée à un utilisateur,
+  // nécessaire côté client AVANT de pouvoir reconstruire le code stable.
+  rpc RecupererDonneeAide (DemandeDonneeAide) returns (ReponseDonneeAide);
+
+  // Demande un nonce anti-rejeu juste avant l'envoi de la preuve (challenge-response)
+  rpc DemanderNonce (DemandeNonce) returns (ReponseNonce);
+
+  // Envoie la preuve ZKP générée côté client pour vérification
+  rpc VerifierPreuve (DemandeVerification) returns (ReponseVerification);
+}
+
+message DemandeDonneeAide {
+  string utilisateur_id = 1;
+}
+
+message ReponseDonneeAide {
+  bool trouve = 1;
+  string donnee_aide = 2;        // donnée publique du fuzzy extractor (non sensible seule)
+  string parametres_extraction = 3;
+}
+
+message DemandeNonce {
+  string utilisateur_id = 1;
+}
+
+message ReponseNonce {
+  string nonce = 1;
+  int64 expiration_timestamp = 2;  // validité courte (quelques secondes)
+}
+
+message DemandeVerification {
+  string utilisateur_id = 1;
+  string preuve_zkp = 2;
+  string nonce = 3;
+  int64 timestamp = 4;
+  string service_cible = 5;
+  string appareil_signature = 6;
+}
+
+message ReponseVerification {
+  bool accepte = 1;
+  string raison_refus = 2;       // vide si accepté
+  string token = 3;              // présent uniquement si accepté
+  int64 score_anomalie = 4;      // retour de la détection de fraude comportementale
+}

@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package sync;
+
+// Service échangé UNIQUEMENT entre noeuds (jamais exposé au client)
+service SyncService {
+  // Echange périodique des racines de Merkle pour détecter une désynchronisation
+  rpc EchangerRacine (DemandeRacine) returns (ReponseRacine);
+
+  // Demande le détail d'une branche précise de l'arbre (resynchronisation ciblée)
+  rpc RecupererBranche (DemandeBranche) returns (ReponseBranche);
+
+  // Heartbeat simple pour la détection de panne / health check
+  rpc Heartbeat (PingNoeud) returns (PongNoeud);
+}
+
+message DemandeRacine {
+  string noeud_id = 1;
+}
+
+message ReponseRacine {
+  string racine_hash = 1;
+  int64 derniere_maj = 2;
+}
+
+message DemandeBranche {
+  string chemin_branche = 1;   // ex: "0.1.0" position dans l'arbre
+}
+
+message ReponseBranche {
+  repeated NoeudMerkle noeuds = 1;
+}
+
+message NoeudMerkle {
+  string chemin = 1;
+  string hash = 2;
+  bool est_feuille = 3;
+  string utilisateur_id = 4;   // renseigné uniquement si feuille
+}
+
+message PingNoeud {
+  string noeud_id = 1;
+  int64 timestamp = 2;
+}
+
+message PongNoeud {
+  string noeud_id = 1;
+  bool en_sante = 2;
+}

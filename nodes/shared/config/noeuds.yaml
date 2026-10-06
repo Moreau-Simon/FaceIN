@@ -1,0 +1,21 @@
+# Liste de référence de tous les noeuds du réseau de vérification.
+# En environnement de démo, cette liste est aussi dérivée de la variable
+# d'environnement PEERS passée à chaque conteneur (voir docker-compose.yml).
+
+noeuds:
+  - id: node-a
+    host: node-a
+    port: 50051
+  - id: node-b
+    host: node-b
+    port: 50052
+  - id: node-c
+    host: node-c
+    port: 50053
+
+consensus:
+  seuil_majorite: 2        # nombre minimum de noeuds devant valider une preuve
+  timeout_ms: 1500          # délai au-delà duquel un noeud est exclu du calcul
+
+sync_merkle:
+  intervalle_secondes: 10   # fréquence d'échange des racines entre noeuds
