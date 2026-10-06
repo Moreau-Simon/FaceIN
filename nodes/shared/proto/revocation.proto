@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package revocation;
+
+service RevocationService {
+  // Diffuse une révocation à un noeud pair (broadcast initié par le noeud qui reçoit la demande)
+  rpc PropagerRevocation (DemandeRevocation) returns (AccuseReception);
+
+  // Permet à un noeud de vérifier s'il est à jour sur les dernières révocations connues
+  rpc VerifierFraicheur (DemandeFraicheur) returns (ReponseFraicheur);
+}
+
+message DemandeRevocation {
+  string utilisateur_id = 1;
+  string engagement_id = 2;
+  string raison = 3;
+  int64 timestamp_revocation = 4;
+  string noeud_origine = 5;
+}
+
+message AccuseReception {
+  bool recu = 1;
+  string noeud_id = 2;
+}
+
+message DemandeFraicheur {
+  string noeud_id = 1;
+}
+
+message ReponseFraicheur {
+  int64 derniere_revocation_connue = 1;
+  bool a_jour = 2;
+}
