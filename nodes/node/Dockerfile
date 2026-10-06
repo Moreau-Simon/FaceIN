@@ -12,4 +12,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY node/ .
 COPY shared/ /app/shared
 
+RUN python -m grpc_tools.protoc \
+    -I /app/shared/proto \
+    --python_out=/app \
+    --grpc_python_out=/app \
+    /app/shared/proto/verification.proto \
+    /app/shared/proto/sync.proto \
+    /app/shared/proto/revocation.proto
+    
 CMD ["python", "main.py"]
