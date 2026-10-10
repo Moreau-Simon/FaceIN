@@ -1,0 +1,4 @@
+node/tests
+node/requirements-dev.txt
+**/__pycache__
+**/*.pyc
