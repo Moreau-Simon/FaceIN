@@ -11,8 +11,11 @@ docker-compose up --build
 Vous devriez voir les trois noeuds (`node-a`, `node-b`, `node-c`) démarrer
 et logguer leur identité et la liste de leurs pairs. Une fois le serveur gRPC
 démarré, chaque noeud envoie un heartbeat à chacun de ses pairs, puis attend
-5 secondes avant le cycle suivant. Les envois, réponses et erreurs sont
-journalisés ; chaque appel expire après 3 secondes au maximum.
+l'intervalle configuré avant le cycle suivant. Les envois, réponses et erreurs
+sont journalisés. L'intervalle et le délai maximal d'un appel heartbeat sont
+configurés dans `shared/config/noeuds.yaml`, sous `heartbeat`. Les appels sont
+séquentiels : la durée réelle d'un cycle inclut aussi le temps passé à
+contacter les pairs.
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via
@@ -48,8 +51,8 @@ métier.
 
 ## Config partagée
 
-Le fichier `shared/config/noeuds.yaml` sert de référence humaine pour la
-liste des noeuds et les paramètres de consensus/sync — la configuration
-réellement utilisée par chaque conteneur passe par les variables
-d'environnement du `docker-compose.yml`, pour rester cohérent avec le
-principe "un seul code, configuré au démarrage".
+Le `docker-compose.yml` est la source de vérité pour la topologie des noeuds
+et leurs pairs (`NODE_ID`, `NODE_PORT`, `PEERS`). Le fichier
+`shared/config/noeuds.yaml` contient les paramètres partagés de consensus,
+de synchronisation Merkle et de heartbeat, chargés et validés au démarrage
+par `node/config.py`.

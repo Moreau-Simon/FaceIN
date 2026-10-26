@@ -10,12 +10,11 @@ import grpc
 import sync_pb2
 import sync_pb2_grpc
 
-
 logger = logging.getLogger(__name__)
 
 
-def envoyer_heartbeat(node_id, host, port):
-    """Appelle le service Heartbeat d'un pair avec un délai maximal de 3 s."""
+def envoyer_heartbeat(node_id, host, port, timeout_sec):
+    """Appelle le service Heartbeat d'un pair avec un délai maximal configuré."""
     address = f"{host}:{port}"
 
     logger.info(
@@ -32,7 +31,7 @@ def envoyer_heartbeat(node_id, host, port):
                 noeud_id=node_id,
                 timestamp=int(time.time() * 1000),
             ),
-            timeout=3,
+            timeout=timeout_sec,
         )
 
         if response.en_sante:

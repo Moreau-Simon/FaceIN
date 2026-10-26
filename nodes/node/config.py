@@ -86,12 +86,16 @@ def _charger_yaml(chemin: str | None = None) -> dict:
 
     consensus = config.get("consensus")
     sync_merkle = config.get("sync_merkle")
+    heartbeat = config.get("heartbeat")
 
     if not isinstance(consensus, dict):
         raise RuntimeError("Section 'consensus' absente ou invalide")
 
     if not isinstance(sync_merkle, dict):
         raise RuntimeError("Section 'sync_merkle' absente ou invalide")
+
+    if not isinstance(heartbeat, dict):
+        raise RuntimeError("Section 'heartbeat' absente ou invalide")
 
     seuil = consensus.get("seuil_majorite")
     if seuil is not None:
@@ -105,6 +109,13 @@ def _charger_yaml(chemin: str | None = None) -> dict:
         "intervalle_secondes": _entier_positif(
             "intervalle_secondes", sync_merkle.get("intervalle_secondes")
         ),
+        "intervalle_heartbeat_secondes": _entier_positif(
+            "heartbeat.intervalle_secondes",
+            heartbeat.get("intervalle_secondes"),
+        ),
+        "timeout_heartbeat_secondes": _entier_positif(
+            "heartbeat.timeout_secondes", heartbeat.get("timeout_secondes")
+        ),
     }
 
 
@@ -114,6 +125,11 @@ def _charger_yaml(chemin: str | None = None) -> dict:
 
 def _valider_port(port: int, contexte: str) -> None:
     """Vérifie qu'un port est dans la plage valide."""
+    if type(port) is not int:
+        raise RuntimeError(
+            f"Port invalide pour {contexte} : {port!r}. "
+            "Un entier est attendu"
+        )
     if not 1 <= port <= 65535:
         raise RuntimeError(
             f"Port hors limites (1-65535) pour {contexte} : {port}"
@@ -250,4 +266,8 @@ def charger_configuration() -> dict:
         "seuil_majorite": seuil,
         "timeout_ms_consensus": config_yaml["timeout_ms"],
         "intervalle_sec_merkle": config_yaml["intervalle_secondes"],
+        "intervalle_sec_heartbeat": config_yaml[
+            "intervalle_heartbeat_secondes"
+        ],
+        "timeout_sec_heartbeat": config_yaml["timeout_heartbeat_secondes"],
     }

@@ -36,7 +36,17 @@ class PeerInfo:
 
 
 class PeerRegistry:
-    """Stocke et protège l'état des pairs contre les accès concurrents."""
+    """Stocke et protège l'état des pairs contre les accès concurrents.
+
+    Le verrou protège uniquement CE registre contre les accès simultanés de
+    plusieurs threads. Chaque nœud a sa propre vue de ses pairs : deux nœuds
+    peuvent temporairement en avoir une différente. L'accord entre nœuds est
+    le rôle du consensus (quorum), pas de ce registre.
+
+    La clé d'un pair est son `node_id` au sens du registre : en pratique
+    « hote:port » (voir cle_pair), car la configuration ne connaît que
+    l'adresse d'un pair.
+    """
 
     def __init__(
         self,

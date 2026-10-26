@@ -17,7 +17,6 @@ from config import charger_configuration
 from network.peer_client import envoyer_heartbeat
 from network.server import start_grpc_server
 
-
 # ---------------------------------------------------------------------------
 # Configuration des logs
 # ---------------------------------------------------------------------------
@@ -75,6 +74,7 @@ def main():
                         config["node_id"],
                         peer["host"],
                         peer["port"],
+                        config["timeout_sec_heartbeat"],
                     )
                 except grpc.RpcError as error:
                     logger.warning(
@@ -84,7 +84,7 @@ def main():
                         error,
                     )
 
-            time.sleep(5)
+            time.sleep(config["intervalle_sec_heartbeat"])
 
     except KeyboardInterrupt:
         # Attendre l'arrêt du serveur avant d'annoncer qu'il est arrêté.

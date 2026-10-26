@@ -22,6 +22,9 @@ consensus:
   timeout_ms: 1500
 sync_merkle:
   intervalle_secondes: 10
+heartbeat:
+  intervalle_secondes: 5
+  timeout_secondes: 15
 """
 
 YAML_SANS_SEUIL = """\
@@ -29,6 +32,9 @@ consensus:
   timeout_ms: 1500
 sync_merkle:
   intervalle_secondes: 10
+heartbeat:
+  intervalle_secondes: 5
+  timeout_secondes: 15
 """
 
 
@@ -79,6 +85,8 @@ def test_configuration_valide(noeud_a):
     assert config["seuil_majorite"] == 2
     assert config["timeout_ms_consensus"] == 1500
     assert config["intervalle_sec_merkle"] == 10
+    assert config["intervalle_sec_heartbeat"] == 5
+    assert config["timeout_sec_heartbeat"] == 15
 
 
 def test_port_par_defaut(noeud_a, monkeypatch):
@@ -275,10 +283,24 @@ def test_section_consensus_absente(ecrire_yaml, monkeypatch):
 
 
 def test_section_sync_merkle_absente(ecrire_yaml, monkeypatch):
-    ecrire_yaml("consensus:\n  timeout_ms: 1500\n")
+    ecrire_yaml(
+        "consensus:\n  timeout_ms: 1500\n"
+        "heartbeat:\n  intervalle_secondes: 5\n  timeout_secondes: 15\n"
+    )
     monkeypatch.setenv("NODE_ID", "node-a")
 
     with pytest.raises(RuntimeError, match="'sync_merkle'"):
+        charger_configuration()
+
+
+def test_section_heartbeat_absente(ecrire_yaml, monkeypatch):
+    ecrire_yaml(
+        "consensus:\n  timeout_ms: 1500\n"
+        "sync_merkle:\n  intervalle_secondes: 10\n"
+    )
+    monkeypatch.setenv("NODE_ID", "node-a")
+
+    with pytest.raises(RuntimeError, match="'heartbeat'"):
         charger_configuration()
 
 
@@ -292,6 +314,8 @@ def test_section_sync_merkle_absente(ecrire_yaml, monkeypatch):
         ("timeout_ms: 1500", "timeout_ms: true"),
         ("intervalle_secondes: 10", "intervalle_secondes: 0"),
         ("seuil_majorite: 2", "seuil_majorite: -1"),
+        ("intervalle_secondes: 5", "intervalle_secondes: 0"),
+        ("timeout_secondes: 15", "timeout_secondes: 0"),
     ],
 )
 def test_parametre_yaml_invalide(ecrire_yaml, monkeypatch, ancien, nouveau):
@@ -306,6 +330,7 @@ def test_parametre_obligatoire_manquant(ecrire_yaml, monkeypatch):
     ecrire_yaml(
         "consensus:\n  seuil_majorite: 2\n"
         "sync_merkle:\n  intervalle_secondes: 10\n"
+        "heartbeat:\n  intervalle_secondes: 5\n  timeout_secondes: 15\n"
     )
     monkeypatch.setenv("NODE_ID", "node-a")
 
@@ -330,3 +355,5 @@ def test_le_vrai_noeuds_yaml_du_depot_est_valide(monkeypatch):
     assert config["seuil_majorite"] >= 2
     assert config["timeout_ms_consensus"] > 0
     assert config["intervalle_sec_merkle"] > 0
+    assert config["intervalle_sec_heartbeat"] > 0
+    assert config["timeout_sec_heartbeat"] > 0
