@@ -128,25 +128,21 @@ def test_seuil_par_defaut_met_le_pair_hors_ligne(pair_enregistre):
     assert pair.last_error == "timeout"
 
 
-def test_seuil_personnalise_est_applique(pair_enregistre):
-    pair_enregistre.record_failure(
-        "node-a", "connexion refusée", failures_before_offline=2
-    )
-    assert pair_enregistre.get_peer("node-a").status == "suspect"
+def test_seuil_personnalise_est_applique():
+    registre = PeerRegistry(failures_before_offline=2)
+    registre.register_peer("node-a", "localhost", 50051)
 
-    pair_enregistre.record_failure(
-        "node-a", "connexion refusée", failures_before_offline=2
-    )
-    assert pair_enregistre.get_peer("node-a").status == "offline"
+    registre.record_failure("node-a", "connexion refusée")
+    assert registre.get_peer("node-a").status == "suspect"
+
+    registre.record_failure("node-a", "connexion refusée")
+    assert registre.get_peer("node-a").status == "offline"
 
 
-def test_seuil_d_echec_invalide_est_refuse(pair_enregistre):
-    for seuil in (0, -1):
-        with pytest.raises(ValueError, match="doit être positif"):
-            pair_enregistre.record_failure(
-                "node-a", "erreur", failures_before_offline=seuil
-            )
-
+@pytest.mark.parametrize("seuil", [0, -1])
+def test_seuil_invalide_est_refuse_a_la_creation(seuil):
+    with pytest.raises(ValueError, match="doit être positif"):
+        PeerRegistry(failures_before_offline=seuil)
 
 def test_heartbeat_retablit_un_pair_hors_ligne(pair_enregistre):
     for _ in range(3):
