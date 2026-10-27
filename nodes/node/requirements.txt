@@ -1,4 +1,9 @@
+# Dépendances Python pour le noeud de vérification FaceIn
 grpcio==1.66.1
 grpcio-tools==1.66.1
 protobuf==5.27.2
 pyyaml==6.0.2
+
+# Note : La vérification des preuves ZKP Groth16 nécessite également l'installation
+# de l'environnement Node.js et du paquet global snarkjs (npm install -g snarkjs),
+# pris en charge directement dans le Dockerfile du conteneur.

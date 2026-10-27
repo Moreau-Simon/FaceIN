@@ -12,10 +12,14 @@ import logging
 import os
 import time
 
-import grpc
+try:
+    import grpc
+except ImportError:
+    grpc = None
 
 from network.peer_client import envoyer_heartbeat
 from network.server import start_grpc_server
+from store.engagements import EngagementsStore
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +117,18 @@ def main():
         config["peers"],
     )
 
+    # Initialisation du magasin d'engagements cryptographiques
+    store = EngagementsStore()
+    logger.info(
+        "[%s] Nombre d'engagements chargés au démarrage : %d",
+        config["node_id"],
+        store.count(),
+    )
+
     server = start_grpc_server(
         config["node_id"],
         config["port"],
+        store=store,
     )
     logger.info(
         "[%s] Noeud prêt ; %d pair(s) configuré(s)",

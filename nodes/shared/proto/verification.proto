@@ -2,50 +2,58 @@ syntax = "proto3";
 
 package verification;
 
-// Service exposé par chaque noeud pour vérifier une authentification
+// Service exposé par chaque noeud pour vérifier une authentification biométrique ZKP
 service VerificationService {
-  // Récupère la donnée d'aide (fuzzy extractor) associée à un utilisateur,
-  // nécessaire côté client AVANT de pouvoir reconstruire le code stable.
+  // Récupère l'engagement cryptographique (Poseidon) associé à un utilisateur,
+  // nécessaire côté client pour initialiser et vérifier la preuve ZKP.
+  // Nom de méthode conservé pour compatibilité ascendante.
   rpc RecupererDonneeAide (DemandeDonneeAide) returns (ReponseDonneeAide);
 
-  // Demande un nonce anti-rejeu juste avant l'envoi de la preuve (challenge-response)
+  // Demande un nonce anti-rejeu juste avant l'envoi de la preuve ZKP (challenge-response)
   rpc DemanderNonce (DemandeNonce) returns (ReponseNonce);
 
-  // Envoie la preuve ZKP générée côté client pour vérification
+  // Envoie la preuve ZKP Groth16 et les signaux publics générés côté client pour vérification
   rpc VerifierPreuve (DemandeVerification) returns (ReponseVerification);
 }
 
+// Demande de récupération de l'engagement de référence (nom conservé pour rétro-compatibilité)
 message DemandeDonneeAide {
   string utilisateur_id = 1;
 }
 
+// Réponse contenant l'engagement cryptographique de référence de l'utilisateur
 message ReponseDonneeAide {
   bool trouve = 1;
-  string donnee_aide = 2;        // donnée publique du fuzzy extractor (non sensible seule)
-  string parametres_extraction = 3;
+  string donnee_aide = 2;        // Engagement cryptographique de l'utilisateur (hachage Poseidon du vecteur de référence)
+  string parametres_extraction = 3; // Métadonnées d'extraction ou de circuit additionnelles
 }
 
+// Demande d'un nonce éphémère anti-rejeu
 message DemandeNonce {
   string utilisateur_id = 1;
 }
 
+// Réponse contenant le nonce généré par le noeud
 message ReponseNonce {
   string nonce = 1;
-  int64 expiration_timestamp = 2;  // validité courte (quelques secondes)
+  int64 expiration_timestamp = 2;  // Validité courte (60 secondes)
 }
 
+// Demande de vérification de la preuve à divulgation nulle de connaissance (ZKP)
 message DemandeVerification {
   string utilisateur_id = 1;
-  string preuve_zkp = 2;
-  string nonce = 3;
-  int64 timestamp = 4;
-  string service_cible = 5;
-  string appareil_signature = 6;
+  string preuve_zkp = 2;           // Chaîne JSON de la preuve Groth16 (pi_a, pi_b, pi_c)
+  string nonce = 3;                // Nonce anti-rejeu validé
+  int64 timestamp = 4;            // Horodatage de la requête
+  string service_cible = 5;       // Service ou site demandeur
+  string appareil_signature = 6;  // Signature matérielle ou d'appareil optionnelle
+  repeated string public_signals = 7; // Signaux publics ZKP : [engagementAttendu, seuilMax]
 }
 
+// Réponse renvoyée après vérification de la preuve ZKP
 message ReponseVerification {
   bool accepte = 1;
-  string raison_refus = 2;       // vide si accepté
-  string token = 3;              // présent uniquement si accepté
-  int64 score_anomalie = 4;      // retour de la détection de fraude comportementale
+  string raison_refus = 2;       // Raison du refus (vide si accepté)
+  string token = 3;              // Jeton de session / JWT (fourni uniquement si accepté)
+  int64 score_anomalie = 4;      // Score de détection de fraude / anomalie
 }

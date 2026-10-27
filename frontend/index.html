@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaceIn — Authentification Biométrique</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-container">
+
+    <!-- En-tête -->
+    <header class="header">
+        <div class="logo-badge">🛡️ ZKP Biometrics</div>
+        <h1>FaceIn — Authentification Biométrique</h1>
+        <p class="subtitle">Vérification d'identité à divulgation nulle de connaissance</p>
+    </header>
+
+    <!-- Carte Principale -->
+    <main class="main-card">
+        <!-- Barre de navigation des onglets -->
+        <nav class="tabs-nav" role="tablist">
+            <button class="tab-button active" data-tab="register" id="tab-btn-register" role="tab" aria-selected="true" aria-controls="tab-register">
+                📝 Inscription
+            </button>
+            <button class="tab-button" data-tab="auth" id="tab-btn-auth" role="tab" aria-selected="false" aria-controls="tab-auth">
+                🔐 Connexion
+            </button>
+        </nav>
+
+        <!-- Section 1 : Inscription -->
+        <section id="tab-register" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-register">
+            <div class="form-group">
+                <label for="user-id-register" class="form-label">Identifiant (pseudo) :</label>
+                <input type="text" id="user-id-register" class="form-input" placeholder="Ex: alice_92" autocomplete="off" required>
+                <p class="form-hint">Votre pseudo servira d'identifiant public sur le réseau décentralisé.</p>
+            </div>
+
+            <!-- Flux Webcam & Canvas d'overlay -->
+            <div class="video-wrapper">
+                <video id="video-register" class="video-element" autoplay playsinline muted></video>
+                <canvas id="canvas-register" style="display: none;"></canvas>
+                <div class="face-guide-overlay" aria-hidden="true"></div>
+            </div>
+
+            <button id="btn-register" class="btn-primary" type="button">
+                📸 S'inscrire (Capturer & Enregistrer)
+            </button>
+
+            <!-- Zone de statut Inscription -->
+            <div id="status-register" class="status-box status-info" role="status">
+                En attente du démarrage de la caméra...
+            </div>
+        </section>
+
+        <!-- Section 2 : Connexion -->
+        <section id="tab-auth" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-auth">
+            <div class="form-group">
+                <label for="user-id-auth" class="form-label">Identifiant (pseudo) :</label>
+                <input type="text" id="user-id-auth" class="form-input" placeholder="Ex: alice_92" autocomplete="off" required>
+                <p class="form-hint">Entrez le pseudo utilisé lors de votre inscription sur cet appareil.</p>
+            </div>
+
+            <!-- Flux Webcam & Canvas d'overlay -->
+            <div class="video-wrapper">
+                <video id="video-auth" class="video-element" autoplay playsinline muted></video>
+                <canvas id="canvas-auth" style="display: none;"></canvas>
+                <div class="face-guide-overlay" aria-hidden="true"></div>
+            </div>
+
+            <button id="btn-auth" class="btn-primary" type="button">
+                🛡️ Se connecter (Prouver avec ZKP)
+            </button>
+
+            <!-- Zone de statut Connexion -->
+            <div id="status-auth" class="status-box status-info" role="status">
+                Prêt pour l'authentification.
+            </div>
+        </section>
+    </main>
+
+    <!-- Console de débogage et logs -->
+    <aside class="debug-section" aria-label="Journal d'activité">
+        <div class="debug-header">
+            <span>Journal d'activité & Débogage</span>
+            <button id="btn-clear-logs" class="btn-small" type="button" title="Vider le journal">Effacer</button>
+        </div>
+        <div id="debug-logs" class="debug-logs-container">
+            <div class="log-entry log-info">[Système] Chargement des bibliothèques cryptographiques...</div>
+        </div>
+    </aside>
+
+    <!-- Note de confidentialité -->
+    <footer class="security-note">
+        🔒 <strong>Confidentialité garantie :</strong> Le vecteur facial et la caméra restent confinés dans votre navigateur.
+        Seule la preuve mathématique Zero-Knowledge (Groth16) est transmise au réseau.
+    </footer>
+
+</div>
+
+<!-- 1. Bibliothèque de détection et reconnaissance faciale -->
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+<!-- 2. Bibliothèque de génération de preuves Zero-Knowledge (Groth16 / snarkjs) -->
+<script src="https://cdn.jsdelivr.net/npm/snarkjs@0.7.4/build/snarkjs.min.js"></script>
+
+<!-- 3. Fonctions de hachage cryptographique Poseidon pour SNARKs (chargement ESM) -->
+<script type="module">
+    import * as circomlibjs from 'https://cdn.jsdelivr.net/npm/circomlibjs@0.1.7/+esm';
+    window.circomlibjs = circomlibjs;
+    window.dispatchEvent(new Event('circomlibjs-loaded'));
+</script>
+
+<!-- 4. Modules applicatifs FaceIn (dans l'ordre strict des dépendances) -->
+<script src="js/config.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/face-capture.js"></script>
+<script src="js/zkp-engine.js"></script>
+<script src="js/facein-core.js"></script>
+
+</body>
+</html>

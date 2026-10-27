@@ -1,0 +1,17 @@
+{
+  "name": "facein-circuits",
+  "version": "1.0.0",
+  "description": "Circuits ZKP Groth16 et scripts de test pour l'authentification biométrique FaceIn",
+  "scripts": {
+    "build": "./build.sh",
+    "test": "./test/test_circuit.sh",
+    "generate-input": "node test/generate_test_input.js"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.5"
+  },
+  "author": "FaceIn Team",
+  "license": "ISC"
+}

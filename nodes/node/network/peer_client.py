@@ -5,10 +5,17 @@ Client gRPC utilisé par CE noeud pour appeler ses pairs
 import logging
 import time
 
-import grpc
+try:
+    import grpc
+except ImportError:
+    grpc = None
 
-import sync_pb2
-import sync_pb2_grpc
+try:
+    import sync_pb2
+    import sync_pb2_grpc
+except ImportError:
+    sync_pb2 = None
+    sync_pb2_grpc = None
 
 
 logger = logging.getLogger(__name__)
