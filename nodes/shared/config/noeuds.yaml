@@ -8,4 +8,4 @@ sync_merkle:
 
 heartbeat:
   intervalle_secondes: 5    # fréquence d'envoi des battements de coeur
-  timeout_secondes: 15      # délai maximal d'attente d'une réponse heartbeat par pair
+  timeout_secondes: 3       # délai maximal d'attente d'une réponse heartbeat par pair

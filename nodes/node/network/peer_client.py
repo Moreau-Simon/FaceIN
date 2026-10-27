@@ -13,11 +13,15 @@ import sync_pb2_grpc
 logger = logging.getLogger(__name__)
 
 
-def envoyer_heartbeat(node_id, host, port, timeout_sec):
-    """Appelle le service Heartbeat d'un pair avec un délai maximal configuré."""
+def envoyer_heartbeat(node_id, host, port, timeout_sec) -> tuple[str, bool]:
+    """Appelle le heartbeat d'un pair avec un délai maximal configuré.
+
+    Retourne un tuple ``(node_id_pair, en_sante)`` avec l'identité annoncée
+    par le pair et son indicateur de santé.
+    """
     address = f"{host}:{port}"
 
-    logger.info(
+    logger.debug(
         "[%s] Tentative d'envoi du heartbeat vers %s",
         node_id,
         address,
@@ -35,14 +39,16 @@ def envoyer_heartbeat(node_id, host, port, timeout_sec):
         )
 
         if response.en_sante:
-            logger.info(
+            logger.debug(
                 "[%s] Heartbeat confirmé par %s",
                 node_id,
                 response.noeud_id,
             )
         else:
-            logger.warning(
+            logger.debug(
                 "[%s] Le pair %s a répondu mais se déclare indisponible",
                 node_id,
                 response.noeud_id,
             )
+
+        return response.noeud_id, response.en_sante

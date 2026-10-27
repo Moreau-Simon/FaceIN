@@ -10,12 +10,15 @@ docker-compose up --build
 
 Vous devriez voir les trois noeuds (`node-a`, `node-b`, `node-c`) démarrer
 et logguer leur identité et la liste de leurs pairs. Une fois le serveur gRPC
-démarré, chaque noeud envoie un heartbeat à chacun de ses pairs, puis attend
-l'intervalle configuré avant le cycle suivant. Les envois, réponses et erreurs
-sont journalisés. L'intervalle et le délai maximal d'un appel heartbeat sont
-configurés dans `shared/config/noeuds.yaml`, sous `heartbeat`. Les appels sont
-séquentiels : la durée réelle d'un cycle inclut aussi le temps passé à
-contacter les pairs.
+démarré, chaque noeud envoie un heartbeat à chacun de ses pairs en parallèle,
+puis attend l'intervalle configuré avant le cycle suivant. Les changements
+d'état sont journalisés sans répéter les mêmes messages à chaque tour.
+L'intervalle et le délai maximal d'un appel heartbeat sont configurés dans
+`shared/config/noeuds.yaml`, sous `heartbeat`. Chaque cycle attend le pair le
+plus lent, dans la limite du délai de chaque appel.
+`docker-compose.yml` accorde 10 secondes à chaque nœud pour s'arrêter après
+`docker stop`. Ce délai est supérieur au timeout heartbeat configuré (3 s),
+avec une marge pour terminer les appels en cours et fermer le serveur.
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via
@@ -56,3 +59,14 @@ et leurs pairs (`NODE_ID`, `NODE_PORT`, `PEERS`). Le fichier
 `shared/config/noeuds.yaml` contient les paramètres partagés de consensus,
 de synchronisation Merkle et de heartbeat, chargés et validés au démarrage
 par `node/config.py`.
+
+Les `NODE_ID` sont considérés comme stables pendant l'exécution. Le registre
+associe l'identité annoncée à l'adresse du pair et refuse qu'elle change à
+chaud. Si un `NODE_ID` doit être modifié, arrêter puis recréer tous les
+conteneurs afin que chaque registre en mémoire oublie les anciennes
+associations :
+
+```bash
+docker compose down
+docker compose up --build
+```

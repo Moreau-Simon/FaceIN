@@ -19,7 +19,7 @@ def registre():
 
 @pytest.fixture
 def pair_enregistre(registre):
-    registre.register_peer("node-a", "localhost", 50051)
+    registre.register_peer("localhost", 50051)
     return registre
 
 
@@ -30,62 +30,59 @@ def pair_enregistre(registre):
 
 def test_registre_vide(registre):
     assert registre.get_all_peers() == []
-    assert registre.get_peer("inconnu") is None
+    assert registre.get_peer("localhost", 50051) is None
 
 
 def test_enregistrer_pair_initialise_son_etat(registre):
-    registre.register_peer("node-a", "localhost", 50051)
+    registre.register_peer("localhost", 50051)
 
-    assert registre.get_peer("node-a") == PeerInfo(
-        node_id="node-a",
+    assert registre.get_peer("localhost", 50051) == PeerInfo(
+        node_id=None,
         host="localhost",
         port=50051,
     )
 
 
 @pytest.mark.parametrize(
-    "node_id, host, port",
+    "host, port",
     [
-        ("", "localhost", 50051),
-        ("   ", "localhost", 50051),
-        ("node-a", "", 50051),
-        ("node-a", "   ", 50051),
-        ("node-a", "localhost", 0),
-        ("node-a", "localhost", -1),
-        ("node-a", "localhost", 65536),
+        ("", 50051),
+        ("   ", 50051),
+        ("localhost", 0),
+        ("localhost", -1),
+        ("localhost", 65536),
     ],
 )
 def test_enregistrement_refuse_les_valeurs_invalides(
-    registre, node_id, host, port
+    registre, host, port
 ):
     with pytest.raises(ValueError):
-        registre.register_peer(node_id, host, port)
+        registre.register_peer(host, port)
 
 
 @pytest.mark.parametrize("port", [1, 65535])
 def test_enregistrement_accepte_les_ports_aux_limites(registre, port):
-    registre.register_peer("node-a", "localhost", port)
+    registre.register_peer("localhost", port)
 
-    assert registre.get_peer("node-a").port == port
+    assert registre.get_peer("localhost", port).port == port
 
 
 def test_reenregistrer_le_meme_pair_est_idempotent(pair_enregistre):
-    pair_enregistre.record_failure("node-a", "timeout")
+    pair_enregistre.record_failure("localhost", 50051, "timeout")
 
-    pair_enregistre.register_peer("node-a", "localhost", 50051)
+    pair_enregistre.register_peer("LOCALHOST", 50051)
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "suspect"
     assert pair.consecutive_failures == 1
     assert pair.last_error == "timeout"
 
 
-def test_reenregistrer_id_avec_une_autre_adresse_est_refuse(pair_enregistre):
-    with pytest.raises(ValueError, match="autre adresse"):
-        pair_enregistre.register_peer("node-a", "127.0.0.1", 50051)
-
-    with pytest.raises(ValueError, match="autre adresse"):
-        pair_enregistre.register_peer("node-a", "localhost", 50052)
+def test_un_pair_peut_avoir_un_node_id_inconnu_a_l_enregistrement(
+    pair_enregistre,
+):
+    pair = pair_enregistre.get_peer("localhost", 50051)
+    assert pair.node_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -96,12 +93,12 @@ def test_reenregistrer_id_avec_une_autre_adresse_est_refuse(pair_enregistre):
 def test_heartbeat_met_le_pair_en_ligne_et_enregistre_l_heure(
     pair_enregistre, monkeypatch
 ):
-    pair_enregistre.record_failure("node-a", "timeout")
+    pair_enregistre.record_failure("localhost", 50051, "timeout")
     monkeypatch.setattr(peers_module, "time", lambda: 1234.5)
 
-    pair_enregistre.record_heartbeat("node-a")
+    pair_enregistre.record_heartbeat("localhost", 50051, "node-a")
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "online"
     assert pair.last_heartbeat == 1234.5
     assert pair.consecutive_failures == 0
@@ -109,9 +106,9 @@ def test_heartbeat_met_le_pair_en_ligne_et_enregistre_l_heure(
 
 
 def test_un_echec_isole_rend_le_pair_suspect(pair_enregistre):
-    pair_enregistre.record_failure("node-a", "timeout")
+    pair_enregistre.record_failure("localhost", 50051, "timeout")
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "suspect"
     assert pair.consecutive_failures == 1
     assert pair.last_error == "timeout"
@@ -120,9 +117,9 @@ def test_un_echec_isole_rend_le_pair_suspect(pair_enregistre):
 
 def test_seuil_par_defaut_met_le_pair_hors_ligne(pair_enregistre):
     for _ in range(3):
-        pair_enregistre.record_failure("node-a", "timeout")
+        pair_enregistre.record_failure("localhost", 50051, "timeout")
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "offline"
     assert pair.consecutive_failures == 3
     assert pair.last_error == "timeout"
@@ -130,13 +127,13 @@ def test_seuil_par_defaut_met_le_pair_hors_ligne(pair_enregistre):
 
 def test_seuil_personnalise_est_applique():
     registre = PeerRegistry(failures_before_offline=2)
-    registre.register_peer("node-a", "localhost", 50051)
+    registre.register_peer("localhost", 50051)
 
-    registre.record_failure("node-a", "connexion refusée")
-    assert registre.get_peer("node-a").status == "suspect"
+    registre.record_failure("localhost", 50051, "connexion refusée")
+    assert registre.get_peer("localhost", 50051).status == "suspect"
 
-    registre.record_failure("node-a", "connexion refusée")
-    assert registre.get_peer("node-a").status == "offline"
+    registre.record_failure("localhost", 50051, "connexion refusée")
+    assert registre.get_peer("localhost", 50051).status == "offline"
 
 
 @pytest.mark.parametrize("seuil", [0, -1])
@@ -146,11 +143,11 @@ def test_seuil_invalide_est_refuse_a_la_creation(seuil):
 
 def test_heartbeat_retablit_un_pair_hors_ligne(pair_enregistre):
     for _ in range(3):
-        pair_enregistre.record_failure("node-a", "timeout")
+        pair_enregistre.record_failure("localhost", 50051, "timeout")
 
-    pair_enregistre.record_heartbeat("node-a")
+    pair_enregistre.record_heartbeat("localhost", 50051, "node-a")
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "online"
     assert pair.consecutive_failures == 0
     assert pair.last_error is None
@@ -163,32 +160,32 @@ def test_heartbeat_retablit_un_pair_hors_ligne(pair_enregistre):
 
 
 def test_get_peer_retourne_une_copie(pair_enregistre):
-    copie = pair_enregistre.get_peer("node-a")
+    copie = pair_enregistre.get_peer("localhost", 50051)
     copie.status = "offline"
     copie.host = "autre-hote"
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.status == "unknown"
     assert pair.host == "localhost"
 
 
 def test_get_all_peers_retourne_des_copies(pair_enregistre):
-    pair_enregistre.register_peer("node-b", "localhost", 50052)
+    pair_enregistre.register_peer("localhost", 50052)
 
     copies = pair_enregistre.get_all_peers()
     copies[0].status = "offline"
     copies.clear()
 
     assert len(pair_enregistre.get_all_peers()) == 2
-    assert pair_enregistre.get_peer("node-a").status == "unknown"
+    assert pair_enregistre.get_peer("localhost", 50051).status == "unknown"
 
 
 def test_operations_sur_un_pair_inconnu_levent_key_error(registre):
     with pytest.raises(KeyError, match="Pair inconnu"):
-        registre.record_heartbeat("inconnu")
+        registre.record_heartbeat("localhost", 50051, "node-a")
 
     with pytest.raises(KeyError, match="Pair inconnu"):
-        registre.record_failure("inconnu", "timeout")
+        registre.record_failure("localhost", 50051, "timeout")
 
 
 def test_echecs_concurrents_sont_comptabilises(pair_enregistre):
@@ -196,11 +193,13 @@ def test_echecs_concurrents_sont_comptabilises(pair_enregistre):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(
             pool.map(
-                lambda _: pair_enregistre.record_failure("node-a", "timeout"),
+                lambda _: pair_enregistre.record_failure(
+                    "localhost", 50051, "timeout"
+                ),
                 range(nombre_echecs),
             )
         )
 
-    pair = pair_enregistre.get_peer("node-a")
+    pair = pair_enregistre.get_peer("localhost", 50051)
     assert pair.consecutive_failures == nombre_echecs
     assert pair.status == "offline"

@@ -19,6 +19,12 @@ def cle_pair(host: str, port: int) -> str:
     L'hôte est mis en minuscules, comme pour la détection de doublons
     dans config.py.
     """
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError("host ne peut pas être vide")
+    if type(port) is not int:
+        raise TypeError("port doit être un entier")
+    if not 1 <= port <= 65535:
+        raise ValueError("port doit être compris entre 1 et 65535")
     return f"{host.strip().lower()}:{port}"
 
 
@@ -26,7 +32,7 @@ def cle_pair(host: str, port: int) -> str:
 class PeerInfo:
     """État observé d'un pair du réseau."""
 
-    node_id: str
+    node_id: str | None
     host: str
     port: int
     status: PeerStatus = "unknown"
@@ -43,9 +49,8 @@ class PeerRegistry:
     peuvent temporairement en avoir une différente. L'accord entre nœuds est
     le rôle du consensus (quorum), pas de ce registre.
 
-    La clé d'un pair est son `node_id` au sens du registre : en pratique
-    « hote:port » (voir cle_pair), car la configuration ne connaît que
-    l'adresse d'un pair.
+    Les pairs sont indexés par leur adresse normalisée « hote:port ».
+    Leur node_id reste inconnu jusqu'à la première réponse heartbeat valide.
     """
 
     def __init__(
@@ -55,48 +60,61 @@ class PeerRegistry:
         self._verifier_seuil(failures_before_offline)
         self._failures_before_offline = failures_before_offline
         self._peers: dict[str, PeerInfo] = {}
+        self._node_ids: dict[str, str] = {}
         self._lock = Lock()
 
     def register_peer(
         self,
-        node_id: str,
         host: str,
         port: int,
     ) -> None:
-        """Ajoute un pair sans écraser silencieusement un pair existant."""
-        if not node_id.strip():
-            raise ValueError("node_id ne peut pas être vide")
-        if not host.strip():
-            raise ValueError("host ne peut pas être vide")
-        if type(port) is not int:
-            raise TypeError("port doit être un entier")
-        if not 1 <= port <= 65535:
-            raise ValueError("port doit être compris entre 1 et 65535")
-
+        """Ajoute un pair configuré par adresse, sans identité présumée."""
+        cle = cle_pair(host, port)
+        host_normalise = host.strip()
         with self._lock:
-            if node_id in self._peers:
-                existing = self._peers[node_id]
-                if (existing.host, existing.port) != (host, port):
-                    raise ValueError(
-                        f"Le pair {node_id!r} existe déjà "
-                        "avec une autre adresse"
-                    )
+            if cle in self._peers:
                 return
 
-            self._peers[node_id] = PeerInfo(
-                node_id=node_id,
-                host=host,
+            self._peers[cle] = PeerInfo(
+                node_id=None,
+                host=host_normalise,
                 port=port,
             )
 
-    def record_heartbeat(self, node_id: str) -> tuple[PeerStatus, PeerStatus]:
+    def record_heartbeat(
+        self, host: str, port: int, node_id: str
+    ) -> tuple[PeerStatus, PeerStatus]:
         """Enregistre une réponse réussie à un heartbeat.
 
+        Associe l'identité annoncée à l'adresse interrogée et refuse toute
+        identité vide, changeante ou déjà associée à une autre adresse.
         Retourne (ancien_statut, nouveau_statut) pour permettre de
         journaliser uniquement les changements d'état.
         """
+        if not isinstance(node_id, str):
+            raise TypeError("node_id doit être une chaîne de caractères")
+        node_id = node_id.strip()
+        if not node_id:
+            raise ValueError("node_id ne peut pas être vide")
+
         with self._lock:
-            peer = self._require_peer(node_id)
+            cle = cle_pair(host, port)
+            peer = self._require_peer(cle)
+            if peer.node_id is not None and peer.node_id != node_id:
+                raise ValueError(
+                    f"L'adresse {cle!r} a déjà annoncé le node_id "
+                    f"{peer.node_id!r}, pas {node_id!r}"
+                )
+            cle_identite = node_id.lower()
+            autre_cle = self._node_ids.get(cle_identite)
+            if autre_cle is not None and autre_cle != cle:
+                raise ValueError(
+                    f"Le node_id {node_id!r} est déjà associé à "
+                    f"l'adresse {autre_cle!r}, pas {cle!r}"
+                )
+
+            peer.node_id = node_id
+            self._node_ids[cle_identite] = cle
             ancien = peer.status
             peer.status = "online"
             peer.last_heartbeat = time()
@@ -106,7 +124,8 @@ class PeerRegistry:
 
     def record_failure(
         self,
-        node_id: str,
+        host: str,
+        port: int,
         error: str,
     ) -> tuple[PeerStatus, PeerStatus]:
         """Enregistre un échec sans confondre une panne et un échec isolé.
@@ -118,7 +137,7 @@ class PeerRegistry:
         seuil = self._failures_before_offline
 
         with self._lock:
-            peer = self._require_peer(node_id)
+            peer = self._require_peer(cle_pair(host, port))
             ancien = peer.status
             peer.consecutive_failures += 1
             peer.last_error = error
@@ -129,11 +148,11 @@ class PeerRegistry:
                 peer.status = "suspect"
 
             return ancien, peer.status
-        
-    def get_peer(self, node_id: str) -> PeerInfo | None:
+
+    def get_peer(self, host: str, port: int) -> PeerInfo | None:
         """Retourne une copie des informations du pair."""
         with self._lock:
-            peer = self._peers.get(node_id)
+            peer = self._peers.get(cle_pair(host, port))
             if peer is None:
                 return None
 
@@ -161,11 +180,11 @@ class PeerRegistry:
                 if peer.status != "offline"
             ]
 
-    def _require_peer(self, node_id: str) -> PeerInfo:
+    def _require_peer(self, cle: str) -> PeerInfo:
         """Récupère un pair ou signale explicitement son absence."""
-        peer = self._peers.get(node_id)
+        peer = self._peers.get(cle)
         if peer is None:
-            raise KeyError(f"Pair inconnu : {node_id!r}")
+            raise KeyError(f"Pair inconnu : {cle!r}")
         if type(peer.port) is not int:
             raise TypeError("port doit être un entier")
         if not 1 <= peer.port <= 65535:

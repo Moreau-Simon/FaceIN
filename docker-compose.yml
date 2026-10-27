@@ -1,6 +1,6 @@
-# Les trois services ci-dessous utilisent EXACTEMENT la même image
-# (build: ./nodes/node). Ce qui les différencie, c'est uniquement
-# leur configuration via variables d'environnement.
+# Les trois services ci-dessous construisent la même image depuis le contexte
+# ./nodes, avec le Dockerfile node/Dockerfile. Ce qui les différencie, c'est
+# uniquement leur configuration via variables d'environnement.
 #
 # Ajouter un 4e ou 5e noeud pour une démo = ajouter un bloc de plus
 # ici, sans toucher au code.
@@ -11,6 +11,9 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-a
+    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
+    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    stop_grace_period: 10s
     environment:
       - NODE_ID=node-a
       - NODE_PORT=50051
@@ -25,6 +28,9 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-b
+    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
+    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    stop_grace_period: 10s
     environment:
       - NODE_ID=node-b
       - NODE_PORT=50052
@@ -39,6 +45,9 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-c
+    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
+    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    stop_grace_period: 10s
     environment:
       - NODE_ID=node-c
       - NODE_PORT=50053
