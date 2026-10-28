@@ -1,95 +1,159 @@
 """
-Tests unitaires pour VerificationServiceImpl (network/server.py).
+Tests unitaires du VerificationService fusionné (network/server.py) :
+architecture develop (NonceStore + consensus) et magasin d'engagements.
 """
 
-import os
-import sys
-import unittest
-from types import SimpleNamespace
-from unittest.mock import patch
+import json
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import pytest
 
-from network.server import VerificationServiceImpl
+import network.server as server_module
+import verification_pb2
+from consensus.validation import VerificateurZKP
+from network.server import VerificationService
 from store.engagements import EngagementsStore
+from verification.nonces import NonceStore
 
 
-class TestVerificationService(unittest.TestCase):
-    """Vérifie le bon fonctionnement du service de vérification du noeud."""
+@pytest.fixture
+def store():
+    return EngagementsStore()
 
-    def setUp(self):
-        self.store = EngagementsStore()
-        self.service = VerificationServiceImpl(node_id="node-test", store=self.store)
 
-    def test_recuperer_donnee_aide_trouve(self):
-        self.store.save("user_123", "poseidon_hash_abc")
+def _service(store=None, decider_fn=lambda demande: True):
+    nonces = NonceStore()
+    service = VerificationService(
+        "node-test",
+        nonces,
+        decider_fn,
+        lambda utilisateur_id: f"token-{utilisateur_id}",
+        store=store,
+    )
+    return service, nonces
 
-        request = SimpleNamespace(utilisateur_id="user_123")
-        response = self.service.RecupererDonneeAide(request, None)
 
-        self.assertTrue(response.trouve)
-        self.assertEqual(response.donnee_aide, "poseidon_hash_abc")
+def test_recuperer_donnee_aide_trouve(store):
+    store.save("user_123", "poseidon_hash_abc")
+    service, _ = _service(store)
 
-    def test_recuperer_donnee_aide_non_trouve(self):
-        request = SimpleNamespace(utilisateur_id="user_inconnu")
-        response = self.service.RecupererDonneeAide(request, None)
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_123"), None
+    )
 
-        self.assertFalse(response.trouve)
-        self.assertEqual(response.donnee_aide, "")
+    assert reponse.trouve is True
+    assert reponse.donnee_aide == "poseidon_hash_abc"
 
-    def test_demander_nonce(self):
-        request = SimpleNamespace(utilisateur_id="user_123")
-        response = self.service.DemanderNonce(request, None)
 
-        self.assertTrue(len(response.nonce) > 10)
-        self.assertTrue(response.expiration_timestamp > 0)
+def test_recuperer_donnee_aide_non_trouve(store):
+    service, _ = _service(store)
 
-    def test_verifier_preuve_utilisateur_inconnu(self):
-        request = SimpleNamespace(
-            utilisateur_id="user_inconnu",
-            preuve_zkp="{}",
-            nonce="nonce_test",
-            service_cible="demo",
-            public_signals=[],
-        )
-        response = self.service.VerifierPreuve(request, None)
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_inconnu"), None
+    )
 
-        self.assertFalse(response.accepte)
-        self.assertIn("introuvable", response.raison_refus)
+    assert reponse.trouve is False
+    assert reponse.donnee_aide == ""
 
-    def test_verifier_preuve_incoherence_engagement(self):
-        self.store.save("user_123", "engagement_stocke")
 
-        request = SimpleNamespace(
+def test_recuperer_donnee_aide_sans_store():
+    service, _ = _service(store=None)
+
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_123"), None
+    )
+
+    assert reponse.trouve is False
+
+
+def test_demander_nonce_est_emis_par_le_nonce_store():
+    service, nonces = _service()
+
+    reponse = service.DemanderNonce(
+        verification_pb2.DemandeNonce(utilisateur_id="user_123"), None
+    )
+
+    assert len(reponse.nonce) > 10
+    assert reponse.expiration_timestamp > 0
+    assert nonces.consommer("user_123", reponse.nonce) is True
+
+
+def test_verifier_preuve_empaquette_les_signaux_publics_pour_le_consensus():
+    demandes = []
+    service, nonces = _service(decider_fn=lambda d: demandes.append(d) or True)
+    nonce, _ = nonces.emettre("user_123")
+
+    reponse = service.VerifierPreuve(
+        verification_pb2.DemandeVerification(
             utilisateur_id="user_123",
-            preuve_zkp="{}",
-            nonce="nonce_test",
-            service_cible="demo",
-            public_signals=["mauvais_engagement", "1000"],
-        )
-        response = self.service.VerifierPreuve(request, None)
-
-        self.assertFalse(response.accepte)
-        self.assertIn("ne correspond pas", response.raison_refus)
-
-    @patch("consensus.validation.verifier_preuve")
-    def test_verifier_preuve_succes(self, mock_verifier):
-        mock_verifier.return_value = True
-        self.store.save("user_123", "engagement_ok")
-
-        request = SimpleNamespace(
-            utilisateur_id="user_123",
-            preuve_zkp='{"pi_a": []}',
-            nonce="nonce_test",
+            preuve_zkp=b'{"pi_a": ["1"]}',
+            nonce=nonce,
             service_cible="demo",
             public_signals=["engagement_ok", "50000"],
-        )
-        response = self.service.VerifierPreuve(request, None)
+        ),
+        None,
+    )
 
-        self.assertTrue(response.accepte)
-        self.assertEqual(response.raison_refus, "")
-        self.assertTrue(len(response.token) > 0)
+    assert reponse.accepte is True
+    assert reponse.token == "token-user_123"
+    assert json.loads(demandes[0].preuve_zkp) == {
+        "proof": {"pi_a": ["1"]},
+        "publicSignals": ["engagement_ok", "50000"],
+    }
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_verifier_preuve_refuse_une_preuve_illisible_sans_appeler_le_decideur():
+    demandes = []
+    service, nonces = _service(decider_fn=lambda d: demandes.append(d) or True)
+    nonce, _ = nonces.emettre("user_123")
+
+    reponse = service.VerifierPreuve(
+        verification_pb2.DemandeVerification(
+            utilisateur_id="user_123",
+            preuve_zkp=b"pas du json",
+            nonce=nonce,
+            public_signals=["engagement_ok"],
+        ),
+        None,
+    )
+
+    assert reponse.accepte is False
+    assert reponse.raison_refus == "preuve ZKP illisible"
+    assert demandes == []
+
+
+def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
+    class ServeurFactice:
+        def add_insecure_port(self, adresse):
+            return 50051
+
+        def start(self):
+            return None
+
+    enregistres = {}
+    monkeypatch.setattr(server_module.grpc, "server", lambda executor: ServeurFactice())
+    monkeypatch.setattr(
+        server_module.sync_pb2_grpc,
+        "add_SyncServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.consensus_pb2_grpc,
+        "add_ConsensusServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.verification_pb2_grpc,
+        "add_VerificationServiceServicer_to_server",
+        lambda service, serveur: enregistres.update(verification=service),
+    )
+
+    server_module.start_grpc_server(
+        "node-a",
+        50051,
+        VerificateurZKP(store),
+        NonceStore(),
+        lambda demande: True,
+        lambda utilisateur_id: "token",
+    )
+
+    assert enregistres["verification"]._store is store
