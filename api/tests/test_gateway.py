@@ -151,6 +151,12 @@ class TestGrpcBridge(unittest.TestCase):
         self.assertIsInstance(result["consensus"], bool)
         self.assertEqual(len(result["votes"]), 3)
 
+    def test_request_nonce_from_node_fallback(self):
+        # En l'absence de noeuds gRPC actifs, request_nonce_from_node retourne (None, None)
+        nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
+        self.assertIsNone(nonce)
+        self.assertIsNone(exp)
+
 
 class TestJwtManager(unittest.TestCase):
     """Tests pour le gestionnaire de tokens JWT."""

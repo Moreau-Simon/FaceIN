@@ -12,8 +12,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 try:
+    from services.grpc_bridge import request_nonce_from_node
     from services.store import save_nonce
 except ImportError:
+    from api.services.grpc_bridge import request_nonce_from_node
     from api.services.store import save_nonce
 
 logger = logging.getLogger("facein.routes.nonce")
@@ -24,7 +26,7 @@ DUREE_NONCE_SECONDES = 60
 
 
 class NonceResponse(BaseModel):
-    nonce: str = Field(..., description="Valeur hexadécimale aléatoire de 32 octets (anti-rejeu)")
+    nonce: str = Field(..., description="Valeur hexadécimale aléatoire anti-rejeu")
     expires_at: int = Field(..., description="Timestamp Unix d'expiration (en secondes)")
 
 
@@ -32,17 +34,33 @@ class NonceResponse(BaseModel):
     "/nonce/{user_id}",
     response_model=NonceResponse,
     summary="Génération d'un nonce anti-rejeu",
-    description="Génère un nonce unique à usage unique valide pendant 60 secondes pour un utilisateur donné.",
+    description="Génère ou récupère un nonce à usage unique valide pendant 60 secondes pour un utilisateur donné.",
 )
 def get_nonce(user_id: str) -> NonceResponse:
-    # 32 octets aléatoires sous forme hexadécimale
-    nonce = secrets.token_hex(32)
-    expires_at = int(time.time() + DUREE_NONCE_SECONDES)
+    user_id_clean = user_id.strip()
 
-    save_nonce(nonce=nonce, user_id=user_id, expires_at=expires_at)
-    logger.info("Nonce généré pour l'utilisateur '%s' (expiration dans 60s)", user_id)
+    # 1. Tentative d'obtention d'un nonce officiel auprès du réseau de noeuds gRPC
+    nonce, expires_at = request_nonce_from_node(user_id=user_id_clean)
+
+    if not nonce or not expires_at:
+        # Fallback local SQLite (mode test unitaire ou hors conteneur sans noeuds actifs)
+        nonce = secrets.token_hex(32)
+        expires_at = int(time.time() + DUREE_NONCE_SECONDES)
+        logger.info(
+            "Nonce généré localement (fallback SQLite) pour '%s' (expiration dans 60s)",
+            user_id_clean,
+        )
+    else:
+        logger.info(
+            "Nonce anti-rejeu délivré par le réseau gRPC pour '%s' (expiration à %s)",
+            user_id_clean,
+            expires_at,
+        )
+
+    # 2. Enregistrement en SQLite pour double vérification par la passerelle API
+    save_nonce(nonce=nonce, user_id=user_id_clean, expires_at=float(expires_at))
 
     return NonceResponse(
         nonce=nonce,
-        expires_at=expires_at,
+        expires_at=int(expires_at),
     )

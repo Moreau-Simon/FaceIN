@@ -39,6 +39,13 @@ def resolve_verification_key_path(path: Optional[str] = None) -> str:
     if os.path.isfile(docker_path):
         return docker_path
 
+    # 3. Vérification dans le dossier partagé des noeuds (nodes/shared/verification_key.json)
+    shared_path = os.path.normpath(
+        os.path.join(API_DIR, "..", "nodes", "shared", "verification_key.json")
+    )
+    if os.path.isfile(shared_path):
+        return shared_path
+
     # Retourne le chemin par défaut même s'il n'existe pas encore pour message explicite
     return DEFAULT_VK_PATH
 
