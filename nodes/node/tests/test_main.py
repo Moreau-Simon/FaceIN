@@ -2,6 +2,7 @@
 
 import logging
 from threading import Barrier
+from types import SimpleNamespace
 
 import grpc
 import pytest
@@ -70,9 +71,23 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
         "peers": [{"host": "node-b", "port": 50052}],
         "timeout_sec_heartbeat": 15,
         "intervalle_sec_heartbeat": 5,
+        "seuil_majorite": 2,
+        "timeout_ms_consensus": 1500,
     }
     registre = PeerRegistry()
     serveur = ServeurFactice()
+    dependances_serveur = {}
+
+    def demarrer_serveur(
+        node_id, port, verifier, nonces, decider_fn, fabriquer_token
+    ):
+        dependances_serveur.update(
+            verifier=verifier,
+            nonces=nonces,
+            decider_fn=decider_fn,
+            fabriquer_token=fabriquer_token,
+        )
+        return serveur
 
     def interrompre_cycle(_):
         raise KeyboardInterrupt
@@ -82,9 +97,14 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     monkeypatch.setattr(
         main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
     )
-    monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
-    )
+    monkeypatch.setattr(main_module, "start_grpc_server", demarrer_serveur)
+    appels_vote = []
+
+    def demander_vote(host, port, demande, timeout_sec):
+        appels_vote.append((host, port, demande.id_demande, timeout_sec))
+        return "node-b", True
+
+    monkeypatch.setattr(main_module, "demander_vote", demander_vote)
 
     def envoyer(*args):
         if erreur is not None:
@@ -99,6 +119,22 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     assert pair.status == statut_attendu
     assert pair.node_id == node_id_attendu
     assert pair.consecutive_failures == (0 if statut_attendu == "online" else 1)
+    assert dependances_serveur["verifier"] is main_module.valider_avec_mock
+    assert isinstance(dependances_serveur["nonces"], main_module.NonceStore)
+    assert callable(dependances_serveur["decider_fn"])
+    assert callable(dependances_serveur["fabriquer_token"])
+
+    decision = dependances_serveur["decider_fn"](
+        SimpleNamespace(
+            id_demande="requete-123",
+            utilisateur_id="user-1",
+            preuve_zkp=b"preuve",
+            nonce="nonce-123",
+            service_cible="service-1",
+        )
+    )
+    assert decision is True
+    assert appels_vote == [("node-b", 50052, "requete-123", 1.5)]
     assert serveur.arret_demande
 
 
@@ -128,7 +164,10 @@ def test_main_garde_une_raison_courte_et_journalise_les_details_grpc(
         main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
     )
     monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
+        main_module,
+        "start_grpc_server",
+        lambda node_id, port, verifier, nonces, decider_fn, fabriquer_token:
+            serveur,
     )
     monkeypatch.setattr(main_module, "envoyer_heartbeat", envoyer)
 
@@ -234,7 +273,10 @@ def test_main_journalise_une_seule_fois_une_transition_inchangee(
         main_module, "Event", lambda: EvenementFactice(attendre)
     )
     monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
+        main_module,
+        "start_grpc_server",
+        lambda node_id, port, verifier, nonces, decider_fn, fabriquer_token:
+            serveur,
     )
 
     def envoyer(*args):
@@ -288,7 +330,10 @@ def test_main_envoie_les_heartbeats_en_parallele(monkeypatch):
         main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
     )
     monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
+        main_module,
+        "start_grpc_server",
+        lambda node_id, port, verifier, nonces, decider_fn, fabriquer_token:
+            serveur,
     )
 
     def envoyer(node_id, host, port, timeout):
@@ -348,7 +393,10 @@ def test_exception_inattendue_sur_un_pair_n_interrompt_pas_les_autres(
         lambda: EvenementFactice(interrompre_apres_trois_cycles),
     )
     monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
+        main_module,
+        "start_grpc_server",
+        lambda node_id, port, verifier, nonces, decider_fn, fabriquer_token:
+            serveur,
     )
     monkeypatch.setattr(main_module, "envoyer_heartbeat", envoyer)
 
@@ -397,7 +445,10 @@ def test_main_arrete_proprement_sur_sigterm(monkeypatch):
         main_module, "Event", lambda: evenement
     )
     monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
+        main_module,
+        "start_grpc_server",
+        lambda node_id, port, verifier, nonces, decider_fn, fabriquer_token:
+            serveur,
     )
     monkeypatch.setattr(main_module.signal, "signal", installer_signal)
 

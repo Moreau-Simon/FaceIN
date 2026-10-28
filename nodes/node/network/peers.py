@@ -5,7 +5,6 @@ from threading import Lock
 from time import time
 from typing import Literal
 
-
 PeerStatus = Literal["unknown", "online", "suspect", "offline"]
 
 ECHECS_AVANT_HORS_LIGNE_DEFAUT = 3
@@ -26,7 +25,6 @@ def cle_pair(host: str, port: int) -> str:
     if not 1 <= port <= 65535:
         raise ValueError("port doit être compris entre 1 et 65535")
     return f"{host.strip().lower()}:{port}"
-
 
 @dataclass
 class PeerInfo:

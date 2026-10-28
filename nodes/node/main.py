@@ -10,15 +10,18 @@ Important :
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import secrets
 import signal
 from threading import Event
 
 import grpc
 
 from config import ErreurConfiguration, charger_configuration
-from network.peer_client import envoyer_heartbeat
+from consensus.validation import decider, valider_avec_mock
+from network.peer_client import demander_vote, envoyer_heartbeat
 from network.peers import PeerRegistry
 from network.server import ErreurDemarrageServeur, start_grpc_server
+from verification.nonces import NonceStore
 
 # ---------------------------------------------------------------------------
 # Configuration des logs
@@ -90,7 +93,6 @@ def _extraire_erreur_grpc(error: grpc.RpcError) -> tuple[str, str, str]:
     raison = ": ".join(part for part in (code_texte, details_texte) if part)
     return raison or str(error), code_texte, details_texte
 
-
 # ---------------------------------------------------------------------------
 # Programme principal
 # ---------------------------------------------------------------------------
@@ -113,6 +115,26 @@ def main():
     for peer in config["peers"]:
         registre.register_peer(peer["host"], peer["port"])
 
+    nonces = NonceStore()
+
+    def interroger_pair(pair, demande, timeout_s):
+        return demander_vote(
+            pair.host,
+            pair.port,
+            demande,
+            timeout_s,
+        )
+
+    def decider_fn(demande):
+        return decider(
+            demande,
+            registre.get_non_offline_peers(),
+            valider_avec_mock,
+            interroger_pair,
+            config["seuil_majorite"],
+            config["timeout_ms_consensus"] / 1000,
+        )
+
     logger.info(
         "[%s] Initialisation du noeud sur le port %s",
         config["node_id"],
@@ -129,6 +151,10 @@ def main():
         server = start_grpc_server(
             config["node_id"],
             config["port"],
+            valider_avec_mock,
+            nonces,
+            decider_fn,
+            lambda utilisateur_id: secrets.token_urlsafe(32),
         )
     except ErreurDemarrageServeur as exc:
         logger.error("Échec du démarrage du serveur gRPC : %s", exc)

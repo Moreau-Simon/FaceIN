@@ -7,6 +7,8 @@ import time
 
 import grpc
 
+import consensus_pb2
+import consensus_pb2_grpc
 import sync_pb2
 import sync_pb2_grpc
 
@@ -52,3 +54,26 @@ def envoyer_heartbeat(node_id, host, port, timeout_sec) -> tuple[str, bool]:
             )
 
         return response.noeud_id, response.en_sante
+
+def demander_vote(
+    host: str,
+    port: int,
+    demande: consensus_pb2.DemandeVote,
+    timeout_sec: float,
+) -> tuple[str, bool]:
+    """Demande le vote d'un pair et refuse une réponse à une autre demande."""
+    address = f"{host}:{port}"
+    with grpc.insecure_channel(address) as channel:
+        stub = consensus_pb2_grpc.ConsensusServiceStub(channel)
+        reponse = stub.DemanderVote(demande, timeout=timeout_sec)
+
+    if reponse.id_demande != demande.id_demande:
+        raise ValueError(
+            f"Réponse de vote avec id_demande inattendu : "
+            f"{reponse.id_demande!r} (attendu {demande.id_demande!r})"
+        )
+
+    return (
+        reponse.noeud_id,
+        reponse.vote == consensus_pb2.VOTE_POUR,
+    )
