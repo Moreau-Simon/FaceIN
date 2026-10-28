@@ -22,7 +22,7 @@ except ImportError:
 from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
-from consensus.validation import decider, valider_avec_mock
+from consensus.validation import decider, VerificateurZKP
 from network.peer_client import demander_vote, envoyer_heartbeat
 from network.peers import PeerRegistry
 from network.server import ErreurDemarrageServeur, start_grpc_server

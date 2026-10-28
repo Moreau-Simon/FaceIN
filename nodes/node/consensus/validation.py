@@ -20,7 +20,26 @@ from typing import List, Union
 
 logger = logging.getLogger(__name__)
 
-CLE_VERIFICATION_PAR_DEFAUT = "/app/shared/verification_key.json"
+
+def _localiser_verification_key() -> str:
+    """Localise le fichier verification_key.json avec fallbacks (Docker, env, relatif)."""
+    env_path = os.getenv("VERIFICATION_KEY_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    docker_path = "/app/shared/verification_key.json"
+    if os.path.exists(docker_path):
+        return docker_path
+    repo_shared = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "shared", "verification_key.json"
+        )
+    )
+    if os.path.exists(repo_shared):
+        return repo_shared
+    return docker_path
+
+
+CLE_VERIFICATION_PAR_DEFAUT = _localiser_verification_key()
 
 
 # ---------------------------------------------------------------------------

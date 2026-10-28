@@ -7,19 +7,65 @@ Il est conçu pour être thread-safe afin de supporter les accès concurrents
 via le serveur gRPC du noeud.
 """
 
+import json
+import logging
+import os
 import threading
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class EngagementsStore:
     """
-    Magasin en mémoire thread-safe pour les engagements cryptographiques.
+    Magasin thread-safe pour les engagements cryptographiques,
+    avec support d'une persistance sur disque (fichier JSON optionnel).
     """
 
-    def __init__(self) -> None:
-        """Initialise le magasin d'engagements avec un dictionnaire vide et un verrou."""
+    def __init__(self, persistence_file: Optional[str] = None) -> None:
+        """Initialise le magasin d'engagements avec un dictionnaire vide et charge la persistance."""
         self._engagements: Dict[str, str] = {}
         self._lock = threading.Lock()
+        self._file = persistence_file or os.getenv("ENGAGEMENTS_STORE_FILE")
+        self._load()
+
+    def _load(self) -> None:
+        """Charge les engagements depuis le fichier de persistance si disponible."""
+        if self._file and os.path.exists(self._file):
+            try:
+                with open(self._file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self._engagements.update(
+                            {str(k): str(v) for k, v in data.items()}
+                        )
+                        logger.info(
+                            "Engagements chargés depuis %s (%d entrées)",
+                            self._file,
+                            len(self._engagements),
+                        )
+            except Exception as e:
+                logger.warning(
+                    "Impossible de charger les engagements depuis %s : %s",
+                    self._file,
+                    e,
+                )
+
+    def _persist(self) -> None:
+        """Sauvegarde les engagements dans le fichier persistant sous verrou."""
+        if self._file:
+            try:
+                parent_dir = os.path.dirname(os.path.abspath(self._file))
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
+                with open(self._file, "w", encoding="utf-8") as f:
+                    json.dump(self._engagements, f, indent=2)
+            except Exception as e:
+                logger.warning(
+                    "Impossible de persister les engagements dans %s : %s",
+                    self._file,
+                    e,
+                )
 
     def save(self, user_id: str, commitment: str) -> None:
         """
@@ -31,6 +77,7 @@ class EngagementsStore:
         """
         with self._lock:
             self._engagements[user_id] = str(commitment)
+            self._persist()
 
     def get(self, user_id: str) -> Optional[str]:
         """
