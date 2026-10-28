@@ -8,6 +8,7 @@ et calcule le consensus selon la règle de la majorité qualifiée (seuil de 2/3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import os
+import json
 import time
 from typing import Any, Optional
 
