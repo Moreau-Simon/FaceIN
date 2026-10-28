@@ -1,19 +1,22 @@
-# CI FaceIN — couvre l'ensemble du projet
+# CI FaceIN — couvre l'ensemble du projet, fonctionne sur TOUTES les branches
 #
-# Jobs :
-# - lint         : erreurs bloquantes flake8 sur nodes/ et api/
-# - tests-noeuds : génération protobuf + pytest sur nodes/node/tests
-# - tests-api    : génération protobuf + pytest sur api/tests (FastAPI)
-# - circuits     : compilation Circom + setup Groth16 + tests ZKP (preuve valide + rejet imposteur)
-# - docker       : stack complète via compose (3 noeuds + API + frontend) + health checks
+# Résolution du conflit Modification_python-ci vs develop :
+# on garde la CI complète (côté branche) et on SUPPRIME l'ancienne version
+# mono-job (côté develop, entre ======= et >>>>>>>).
+#
+# Pour que cette CI fonctionne aussi sur develop/main (où api/ et circuits/
+# n'existent pas encore), les jobs sont adaptatifs :
+# - un job "detect" identifie les composants présents dans le commit ;
+# - tests-api, circuits et les health checks API/frontend sont ignorés
+#   automatiquement si les dossiers absents ;
+# - le job docker compte les services réellement déclarés dans le compose
+#   (3 noeuds sur develop, 5 services avec l'API et le frontend sur la branche
+#   complète).
 #
 # Non couvert volontairement :
 # - lab_ia/       : prototypes ML exploratoires (dépendances non épinglées, modèles lourds)
-# - frontend/     : statique, validé via le health check HTTP du job docker
 # - partner-demo/ : démo statique, rien à tester automatiquement
-#
-# À appliquer sur la branche qui contient tout le projet (test_tab_euclidien_face),
-# en remplaçant le contenu de .github/workflows/python-ci.yml.
+# - frontend/     : statique, validé via le health check HTTP du job docker
 
 name: FaceIN CI
 
@@ -38,6 +41,26 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Détection des composants présents dans le commit
+  # (api/ et circuits/ n'existent que sur les branches "projet complet")
+  # ---------------------------------------------------------------------------
+  detect:
+    name: Détection des composants
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      api: ${{ steps.composants.outputs.api }}
+      circuits: ${{ steps.composants.outputs.circuits }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Identifier les dossiers présents
+        id: composants
+        run: |
+          if [ -d api ]; then echo "api=true" >> "$GITHUB_OUTPUT"; else echo "api=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -d circuits ]; then echo "circuits=true" >> "$GITHUB_OUTPUT"; else echo "circuits=false" >> "$GITHUB_OUTPUT"; fi
+
+  # ---------------------------------------------------------------------------
   # Lint : erreurs bloquantes uniquement (E9,F63,F7,F82), rapide
   # ---------------------------------------------------------------------------
   lint:
@@ -56,10 +79,13 @@ jobs:
         run: pip install flake8
 
       - name: Lint (erreurs bloquantes)
-        run: flake8 nodes api --count --select=E9,F63,F7,F82 --show-source --statistics
+        run: |
+          cibles="nodes"
+          if [ -d api ]; then cibles="nodes api"; fi
+          flake8 $cibles --count --select=E9,F63,F7,F82 --show-source --statistics
 
   # ---------------------------------------------------------------------------
-  # Tests des noeuds gRPC (partie réseau)
+  # Tests des noeuds gRPC (partie réseau, présente sur toutes les branches)
   # ---------------------------------------------------------------------------
   tests-noeuds:
     name: Tests noeuds gRPC
@@ -104,10 +130,12 @@ jobs:
           path: reports/
 
   # ---------------------------------------------------------------------------
-  # Tests de l'API Gateway (FastAPI)
+  # Tests de l'API Gateway (FastAPI) — uniquement si api/ est présent
   # ---------------------------------------------------------------------------
   tests-api:
     name: Tests API Gateway
+    if: needs.detect.outputs.api == 'true'
+    needs: detect
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -137,10 +165,12 @@ jobs:
         run: python -m pytest api/tests -v
 
   # ---------------------------------------------------------------------------
-  # Circuit ZKP : compilation Circom, setup Groth16, preuve + rejet imposteur
+  # Circuit ZKP — uniquement si circuits/ est présent
   # ---------------------------------------------------------------------------
   circuits:
     name: Circuit ZKP (Circom + Groth16)
+    if: needs.detect.outputs.circuits == 'true'
+    needs: detect
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -182,17 +212,24 @@ jobs:
           path: circuits/build/verification_key.json
 
   # ---------------------------------------------------------------------------
-  # Stack Docker complète : 3 noeuds + API + frontend, puis health checks
+  # Stack Docker déclarée dans docker-compose.yml + health checks adaptatifs
+  # (3 noeuds sur develop, 5 services avec l'API et le frontend sur la branche
+  # complète)
   # ---------------------------------------------------------------------------
   docker:
-    name: Docker — stack complète
+    name: Docker — stack compose
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: circuits  # l'image de l'API exige verification_key.json
+    needs: [detect, circuits]
+    # Toujours évaluer, même si circuits est ignoré (dossier absent) :
+    # on ne saute docker que si circuits a réellement échoué.
+    if: ${{ always() && needs.detect.result == 'success' && needs.circuits.result != 'failure' }}
     steps:
       - uses: actions/checkout@v4
 
+      # Clé de vérification ZKP : nécessaire au build de l'image API uniquement
       - name: Récupérer la clé de vérification du circuit
+        if: needs.detect.outputs.api == 'true'
         uses: actions/download-artifact@v4
         with:
           name: verification-key
@@ -206,47 +243,54 @@ jobs:
 
       - name: Health checks
         run: |
-          # --- API Gateway (FastAPI, port 8000) ---
-          api_ok=0
-          for tentative in $(seq 1 12); do
-            if curl -fsS http://localhost:8000/api/health | grep -q "en_ligne"; then
-              api_ok=1
-              break
-            fi
-            sleep 5
-          done
-          if [ "$api_ok" -ne 1 ]; then
-            echo "::error::Health check de l'API échoué après 60 s."
-            docker compose logs api
-            exit 1
-          fi
-          echo "API en ligne."
+          services=$(docker compose config --services | sort -u)
 
-          # --- Frontend (serveur HTTP statique, port 3000) ---
-          front_ok=0
-          for tentative in $(seq 1 6); do
-            if curl -fsS -o /dev/null http://localhost:3000/; then
-              front_ok=1
-              break
+          # --- API Gateway (FastAPI, port 8000) — si présente ---
+          if echo "$services" | grep -q '^api$'; then
+            api_ok=0
+            for tentative in $(seq 1 12); do
+              if curl -fsS http://localhost:8000/api/health | grep -q "en_ligne"; then
+                api_ok=1
+                break
+              fi
+              sleep 5
+            done
+            if [ "$api_ok" -ne 1 ]; then
+              echo "::error::Health check de l'API échoué après 60 s."
+              docker compose logs api
+              exit 1
             fi
-            sleep 5
-          done
-          if [ "$front_ok" -ne 1 ]; then
-            echo "::error::Frontend inaccessible sur le port 3000."
-            docker compose logs frontend
-            exit 1
+            echo "API en ligne."
           fi
-          echo "Frontend en ligne."
 
-          # --- Les 5 conteneurs doivent être actifs ---
+          # --- Frontend (serveur HTTP statique, port 3000) — si présent ---
+          if echo "$services" | grep -q '^frontend$'; then
+            front_ok=0
+            for tentative in $(seq 1 6); do
+              if curl -fsS -o /dev/null http://localhost:3000/; then
+                front_ok=1
+                break
+              fi
+              sleep 5
+            done
+            if [ "$front_ok" -ne 1 ]; then
+              echo "::error::Frontend inaccessible sur le port 3000."
+              docker compose logs frontend
+              exit 1
+            fi
+            echo "Frontend en ligne."
+          fi
+
+          # --- Tous les services déclarés doivent être actifs ---
+          attendus=$(echo "$services" | wc -l)
           actifs=$(docker compose ps --status running --services | sort -u | wc -l)
-          if [ "$actifs" -ne 5 ]; then
-            echo "::error::Conteneurs actifs : $actifs/5."
+          if [ "$actifs" -ne "$attendus" ]; then
+            echo "::error::Conteneurs actifs : $actifs/$attendus."
             docker compose ps
             docker compose logs
             exit 1
           fi
-          echo "Les 5 services tournent."
+          echo "Les $attendus services tournent."
 
       - name: Arrêter et nettoyer
         if: always()

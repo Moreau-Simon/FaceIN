@@ -9,7 +9,10 @@ docker-compose up --build
 ```
 
 Vous devriez voir les trois noeuds (`node-a`, `node-b`, `node-c`) démarrer
-et logguer leur identité + la liste de leurs pairs, toutes les 5 secondes.
+et logguer leur identité et la liste de leurs pairs. Une fois le serveur gRPC
+démarré, chaque noeud envoie un heartbeat à chacun de ses pairs, puis attend
+5 secondes avant le cycle suivant. Les envois, réponses et erreurs sont
+journalisés ; chaque appel expire après 3 secondes au maximum.
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via
@@ -18,7 +21,9 @@ métier.
 
 ## Prochaines étapes, dans l'ordre
 
-1. **Générer le code gRPC** à partir des `.proto` partagés :
+1. **Générer le code gRPC** à partir des `.proto` partagés. Le
+   `node/Dockerfile` le génère automatiquement pendant la construction de
+   l'image. Pour une génération locale depuis le dossier `nodes` :
    ```bash
    python -m grpc_tools.protoc \
      -I shared/proto \
@@ -27,13 +32,13 @@ métier.
      shared/proto/verification.proto shared/proto/sync.proto shared/proto/revocation.proto
    ```
 
-2. **Implémenter `grpc/server.py`** : faire répondre chaque noeud sur son port,
-   avec des réponses mockées pour `VerifierPreuve` (toujours `accepte=True`
-   par exemple) — ça permet au dev de commencer à tester ses appels client
-   sans attendre que tout soit fini.
+2. **Étendre `network/server.py`** avec le service de vérification. Le service
+   de synchronisation et son endpoint Heartbeat sont déjà opérationnels ;
+   l'endpoint `VerifierPreuve` pourra d'abord renvoyer une réponse mockée
+   (`accepte=True`) pour tester les appels client.
 
-3. **Implémenter `grpc/peer_client.py`** : faire qu'un noeud puisse appeler
-   un autre noeud (test simple : `node-a` ping `node-b` au démarrage).
+3. **Étendre `network/peer_client.py`** pour les autres appels entre noeuds.
+   L'envoi périodique de heartbeat est déjà branché au démarrage.
 
 4. **Brancher `consensus/validation.py`** une fois que plusieurs noeuds
    répondent, pour calculer une vraie majorité.
