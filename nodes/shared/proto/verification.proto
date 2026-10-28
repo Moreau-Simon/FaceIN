@@ -42,11 +42,11 @@ message ReponseNonce {
 // Demande de vérification de la preuve à divulgation nulle de connaissance (ZKP)
 message DemandeVerification {
   string utilisateur_id = 1;
-  string preuve_zkp = 2;           // Chaîne JSON de la preuve Groth16 (pi_a, pi_b, pi_c)
+  bytes preuve_zkp = 2;            // Preuve Groth16 sérialisée en JSON (pi_a, pi_b, pi_c), transmise telle quelle au consensus
   string nonce = 3;                // Nonce anti-rejeu validé
-  int64 timestamp = 4;            // Horodatage de la requête
-  string service_cible = 5;       // Service ou site demandeur
-  string appareil_signature = 6;  // Signature matérielle ou d'appareil optionnelle
+  int64 timestamp = 4;             // Horodatage de la requête
+  string service_cible = 5;        // Service ou site demandeur
+  string appareil_signature = 6;   // Signature matérielle ou d'appareil optionnelle
   repeated string public_signals = 7; // Signaux publics ZKP : [engagementAttendu, seuilMax]
 }
 

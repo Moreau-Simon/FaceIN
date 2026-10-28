@@ -236,3 +236,9 @@ circuits/test/public.json
 *.db
 *.db-journal
 api/facein.db
+
+
+
+#ajout supplementaire
+FaceIN.code-workspace
+.venv312

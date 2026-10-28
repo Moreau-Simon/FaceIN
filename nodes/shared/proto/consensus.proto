@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package consensus;
+
+// Service échangé UNIQUEMENT entre noeuds
+service ConsensusService {
+  rpc DemanderVote (DemandeVote) returns (ReponseVote);
+}
+
+message DemandeVote {
+  string id_demande = 1;        // identifiant unique (uuid), pour les logs et l'idempotence
+  string noeud_initiateur = 2;
+  string utilisateur_id = 3;
+  bytes  preuve_zkp = 4;
+  string service_cible = 5;
+  int64  timestamp = 6;
+  string nonce = 7;
+}
+
+enum TypeVote {
+  VOTE_INCONNU = 0;             // valeur par défaut : jamais un vote valide
+  VOTE_POUR = 1;
+  VOTE_CONTRE = 2;
+}
+
+message ReponseVote {
+  string noeud_id = 1;
+  string id_demande = 2;        // permet de vérifier qu'on lit la bonne réponse
+  TypeVote vote = 3;
+  string raison = 4;            // utile au débogage quand VOTE_CONTRE
+}

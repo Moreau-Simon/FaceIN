@@ -23,6 +23,7 @@ RUN python -m grpc_tools.protoc \
     --grpc_python_out=/app \
     /app/shared/proto/verification.proto \
     /app/shared/proto/sync.proto \
-    /app/shared/proto/revocation.proto
-
+    /app/shared/proto/revocation.proto \
+    /app/shared/proto/consensus.proto
+    
 CMD ["python", "main.py"]
