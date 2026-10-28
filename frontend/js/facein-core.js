@@ -39,7 +39,15 @@ class FaceInCore {
 
         // 4. Initialisation de la webcam sur le flux de l'onglet actif
         try {
-            const initialVideo = document.getElementById('video-register');
+            const urlParams = new URLSearchParams(window.location.search);
+            const mode = urlParams.get('mode');
+            const targetTab = (mode === 'login' || mode === 'auth') ? 'auth' : 'register';
+
+            if (targetTab === 'auth') {
+                this.switchTab('auth');
+            }
+
+            const initialVideo = document.getElementById(targetTab === 'auth' ? 'video-auth' : 'video-register');
             if (initialVideo) {
                 await window.FaceCapture.init(initialVideo);
                 this.log("Webcam et modèles d'IA faciale prêts.", "success");
@@ -324,6 +332,21 @@ class FaceInCore {
                 const token = authResult.token || "SESSION_OK";
                 this.updateStatus(`✅ Authentifié ! Token: ${token}`, false, 'auth');
                 this.log(`[Connexion] Authentification confirmée avec token ${token}`, "success");
+
+                // Transmission automatique du jeton au site partenaire (popup opener) si présent
+                if (window.opener && !window.opener.closed) {
+                    try {
+                        this.log("[Connexion] Transmission du jeton à la fenêtre parente...");
+                        window.opener.postMessage({
+                            type: 'FACEIN_AUTH_SUCCESS',
+                            token: token,
+                            user_id: userId
+                        }, '*');
+                        setTimeout(() => window.close(), 1500);
+                    } catch (openerErr) {
+                        console.warn("[Connexion] Impossible de notifier window.opener:", openerErr);
+                    }
+                }
             } else {
                 const raison = authResult.raison_refus || authResult.message || "Authentification refusée par les nœuds.";
                 this.updateStatus(`❌ Échec: ${raison}`, true, 'auth');

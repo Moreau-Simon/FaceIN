@@ -218,3 +218,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node.js / NPM
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# ZKP / Circom gros fichiers & clés privées
+circuits/build/
+circuits/*.ptau
+circuits/*.zkey
+circuits/test/witness.wtns
+circuits/test/proof.json
+circuits/test/public.json
+
+# Bases SQLite locales
+*.db
+*.db-journal
+api/facein.db
