@@ -98,6 +98,12 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
         main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
     )
     monkeypatch.setattr(main_module, "start_grpc_server", demarrer_serveur)
+
+    verificateur_factice = lambda *args: True
+    monkeypatch.setattr(
+        main_module, "VerificateurZKP", lambda store: verificateur_factice
+    )
+
     appels_vote = []
 
     def demander_vote(host, port, demande, timeout_sec):
@@ -119,7 +125,7 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     assert pair.status == statut_attendu
     assert pair.node_id == node_id_attendu
     assert pair.consecutive_failures == (0 if statut_attendu == "online" else 1)
-    assert dependances_serveur["verifier"] is main_module.valider_avec_mock
+    assert dependances_serveur["verifier"] is verificateur_factice
     assert isinstance(dependances_serveur["nonces"], main_module.NonceStore)
     assert callable(dependances_serveur["decider_fn"])
     assert callable(dependances_serveur["fabriquer_token"])
