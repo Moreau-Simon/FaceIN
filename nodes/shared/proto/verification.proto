@@ -36,7 +36,7 @@ message ReponseNonce {
 
 message DemandeVerification {
   string utilisateur_id = 1;
-  string preuve_zkp = 2;
+  bytes preuve_zkp = 2;
   string nonce = 3;
   int64 timestamp = 4;
   string service_cible = 5;
