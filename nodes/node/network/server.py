@@ -1,13 +1,16 @@
 """
-Serveur gRPC du noeud pour les échanges de synchronisation entre pairs.
-
-Le service SyncService répond actuellement aux heartbeats.
+Serveur gRPC du noeud pour les échanges de synchronisation entre pairs,
+le consensus de vote et la vérification des preuves cryptographiques ZKP.
 """
+
 import logging
 import uuid
 from concurrent import futures
 
-import grpc
+try:
+    import grpc
+except ImportError:
+    grpc = None
 
 import sync_pb2
 import sync_pb2_grpc
@@ -15,6 +18,8 @@ import consensus_pb2
 import consensus_pb2_grpc
 import verification_pb2
 import verification_pb2_grpc
+
+from consensus.validation import empaqueter_preuve
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +31,7 @@ class ErreurDemarrageServeur(RuntimeError):
 class SyncService(sync_pb2_grpc.SyncServiceServicer):
     """Implémente le service de synchronisation exposé par le noeud."""
 
-    def __init__(self, node_id):
+    def __init__(self, node_id: str):
         self.node_id = node_id
 
     def Heartbeat(self, request, context):
@@ -69,15 +74,42 @@ class ConsensusService(consensus_pb2_grpc.ConsensusServiceServicer):
         )
 
 class VerificationService(verification_pb2_grpc.VerificationServiceServicer):
-    def __init__(self, node_id, nonces, decider_fn, fabriquer_token):
+    """Service de vérification exposé aux clients (API, démo partenaire).
+
+    ``store`` (optionnel) est le magasin d'engagements du noeud : sans lui,
+    ``RecupererDonneeAide`` répond « utilisateur inconnu ».
+    """
+
+    def __init__(self, node_id, nonces, decider_fn, fabriquer_token, store=None):
         self.node_id = node_id
         self._nonces = nonces
         self._decider = decider_fn          # demande -> bool
         self._fabriquer_token = fabriquer_token
+        self._store = store
 
     def RecupererDonneeAide(self, request, context):
-        # À brancher sur la BDD. Provisoire : utilisateur inconnu.
-        return verification_pb2.ReponseDonneeAide(trouve=False)
+        """Retourne l'engagement cryptographique (Poseidon) de l'utilisateur.
+
+        Nom de méthode conservé pour rétro-compatibilité avec le protocole initial.
+        """
+        engagement = (
+            self._store.get(request.utilisateur_id)
+            if self._store is not None
+            else None
+        )
+        if engagement is None:
+            logger.warning(
+                "[%s] Aucun engagement trouvé pour l'utilisateur %s",
+                self.node_id,
+                request.utilisateur_id,
+            )
+            return verification_pb2.ReponseDonneeAide(trouve=False)
+
+        return verification_pb2.ReponseDonneeAide(
+            trouve=True,
+            donnee_aide=str(engagement),
+            parametres_extraction="",
+        )
 
     def DemanderNonce(self, request, context):
         if not request.utilisateur_id:
@@ -91,11 +123,22 @@ class VerificationService(verification_pb2_grpc.VerificationServiceServicer):
             return verification_pb2.ReponseVerification(
                 accepte=False, raison_refus="nonce invalide ou expiré")
 
+        # Les signaux publics ZKP voyagent avec la preuve dans le champ
+        # ``preuve_zkp`` de la demande de vote (voir empaqueter_preuve).
+        # Sans signaux publics, la preuve est transmise telle quelle.
+        preuve = request.preuve_zkp
+        if request.public_signals:
+            try:
+                preuve = empaqueter_preuve(preuve, request.public_signals)
+            except ValueError:
+                return verification_pb2.ReponseVerification(
+                    accepte=False, raison_refus="preuve ZKP illisible")
+
         demande = consensus_pb2.DemandeVote(
             id_demande=str(uuid.uuid4()),
             noeud_initiateur=self.node_id,
             utilisateur_id=request.utilisateur_id,
-            preuve_zkp=request.preuve_zkp,
+            preuve_zkp=preuve,
             nonce=request.nonce,
             service_cible=request.service_cible,
             timestamp=request.timestamp,
@@ -116,7 +159,11 @@ def start_grpc_server(
     decider_fn,
     fabriquer_token,
 ):
-    """Démarre le service gRPC et retourne son serveur actif."""
+    """Démarre le service gRPC et retourne son serveur actif.
+
+    Le magasin d'engagements est celui du ``verifier`` (attribut ``store``),
+    s'il en expose un : ``VerificateurZKP`` le fait, ``valider_avec_mock`` non.
+    """
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10)
     )
@@ -132,7 +179,13 @@ def start_grpc_server(
     )
 
     verification_pb2_grpc.add_VerificationServiceServicer_to_server(
-        VerificationService(node_id, nonces, decider_fn, fabriquer_token),
+        VerificationService(
+            node_id,
+            nonces,
+            decider_fn,
+            fabriquer_token,
+            store=getattr(verifier, "store", None),
+        ),
         server,
     )
 

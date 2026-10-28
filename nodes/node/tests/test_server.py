@@ -1,0 +1,159 @@
+"""
+Tests unitaires du VerificationService fusionné (network/server.py) :
+architecture develop (NonceStore + consensus) et magasin d'engagements.
+"""
+
+import json
+
+import pytest
+
+import network.server as server_module
+import verification_pb2
+from consensus.validation import VerificateurZKP
+from network.server import VerificationService
+from store.engagements import EngagementsStore
+from verification.nonces import NonceStore
+
+
+@pytest.fixture
+def store():
+    return EngagementsStore()
+
+
+def _service(store=None, decider_fn=lambda demande: True):
+    nonces = NonceStore()
+    service = VerificationService(
+        "node-test",
+        nonces,
+        decider_fn,
+        lambda utilisateur_id: f"token-{utilisateur_id}",
+        store=store,
+    )
+    return service, nonces
+
+
+def test_recuperer_donnee_aide_trouve(store):
+    store.save("user_123", "poseidon_hash_abc")
+    service, _ = _service(store)
+
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_123"), None
+    )
+
+    assert reponse.trouve is True
+    assert reponse.donnee_aide == "poseidon_hash_abc"
+
+
+def test_recuperer_donnee_aide_non_trouve(store):
+    service, _ = _service(store)
+
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_inconnu"), None
+    )
+
+    assert reponse.trouve is False
+    assert reponse.donnee_aide == ""
+
+
+def test_recuperer_donnee_aide_sans_store():
+    service, _ = _service(store=None)
+
+    reponse = service.RecupererDonneeAide(
+        verification_pb2.DemandeDonneeAide(utilisateur_id="user_123"), None
+    )
+
+    assert reponse.trouve is False
+
+
+def test_demander_nonce_est_emis_par_le_nonce_store():
+    service, nonces = _service()
+
+    reponse = service.DemanderNonce(
+        verification_pb2.DemandeNonce(utilisateur_id="user_123"), None
+    )
+
+    assert len(reponse.nonce) > 10
+    assert reponse.expiration_timestamp > 0
+    assert nonces.consommer("user_123", reponse.nonce) is True
+
+
+def test_verifier_preuve_empaquette_les_signaux_publics_pour_le_consensus():
+    demandes = []
+    service, nonces = _service(decider_fn=lambda d: demandes.append(d) or True)
+    nonce, _ = nonces.emettre("user_123")
+
+    reponse = service.VerifierPreuve(
+        verification_pb2.DemandeVerification(
+            utilisateur_id="user_123",
+            preuve_zkp=b'{"pi_a": ["1"]}',
+            nonce=nonce,
+            service_cible="demo",
+            public_signals=["engagement_ok", "50000"],
+        ),
+        None,
+    )
+
+    assert reponse.accepte is True
+    assert reponse.token == "token-user_123"
+    assert json.loads(demandes[0].preuve_zkp) == {
+        "proof": {"pi_a": ["1"]},
+        "publicSignals": ["engagement_ok", "50000"],
+    }
+
+
+def test_verifier_preuve_refuse_une_preuve_illisible_sans_appeler_le_decideur():
+    demandes = []
+    service, nonces = _service(decider_fn=lambda d: demandes.append(d) or True)
+    nonce, _ = nonces.emettre("user_123")
+
+    reponse = service.VerifierPreuve(
+        verification_pb2.DemandeVerification(
+            utilisateur_id="user_123",
+            preuve_zkp=b"pas du json",
+            nonce=nonce,
+            public_signals=["engagement_ok"],
+        ),
+        None,
+    )
+
+    assert reponse.accepte is False
+    assert reponse.raison_refus == "preuve ZKP illisible"
+    assert demandes == []
+
+
+def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
+    class ServeurFactice:
+        def add_insecure_port(self, adresse):
+            return 50051
+
+        def start(self):
+            return None
+
+    enregistres = {}
+    monkeypatch.setattr(server_module.grpc, "server", lambda executor: ServeurFactice())
+    monkeypatch.setattr(
+        server_module.sync_pb2_grpc,
+        "add_SyncServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.consensus_pb2_grpc,
+        "add_ConsensusServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.verification_pb2_grpc,
+        "add_VerificationServiceServicer_to_server",
+        lambda service, serveur: enregistres.update(verification=service),
+    )
+
+    server_module.start_grpc_server(
+        "node-a",
+        50051,
+        VerificateurZKP(store),
+        NonceStore(),
+        lambda demande: True,
+        lambda utilisateur_id: "token",
+    )
+
+    assert enregistres["verification"]._store is store

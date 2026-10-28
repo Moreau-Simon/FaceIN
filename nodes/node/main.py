@@ -14,7 +14,12 @@ import secrets
 import signal
 from threading import Event
 
-import grpc
+try:
+    import grpc
+except ImportError:
+    grpc = None
+
+from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
 from consensus.validation import decider, valider_avec_mock
@@ -116,6 +121,8 @@ def main():
         registre.register_peer(peer["host"], peer["port"])
 
     nonces = NonceStore()
+    store = EngagementsStore()
+    verifier = VerificateurZKP(store)
 
     def interroger_pair(pair, demande, timeout_s):
         return demander_vote(
@@ -129,7 +136,7 @@ def main():
         return decider(
             demande,
             registre.get_non_offline_peers(),
-            valider_avec_mock,
+            verifier,
             interroger_pair,
             config["seuil_majorite"],
             config["timeout_ms_consensus"] / 1000,
@@ -147,11 +154,17 @@ def main():
         config["peers"],
     )
 
+    logger.info(
+        "[%s] Nombre d'engagements chargés au démarrage : %d",
+        config["node_id"],
+        store.count(),
+    )
+
     try:
         server = start_grpc_server(
             config["node_id"],
             config["port"],
-            valider_avec_mock,
+            verifier,
             nonces,
             decider_fn,
             lambda utilisateur_id: secrets.token_urlsafe(32),
@@ -159,6 +172,7 @@ def main():
     except ErreurDemarrageServeur as exc:
         logger.error("Échec du démarrage du serveur gRPC : %s", exc)
         raise SystemExit(1) from exc
+        
     logger.info(
         "[%s] Noeud prêt ; %d pair(s) configuré(s)",
         config["node_id"],

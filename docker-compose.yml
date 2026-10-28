@@ -1,3 +1,5 @@
+# Configuration Docker Compose du réseau FaceIn
+# Comprend les noeuds de vérification distribués, l'API backend et le frontend.
 # Les trois services ci-dessous construisent la même image depuis le contexte
 # ./nodes, avec le Dockerfile node/Dockerfile. Ce qui les différencie, c'est
 # uniquement leur configuration via variables d'environnement.
@@ -54,6 +56,32 @@ services:
       - PEERS=node-a:50051,node-b:50052
     ports:
       - "50053:50053"
+    networks:
+      - reseau-verification
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: facein-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - node-a
+      - node-b
+      - node-c
+    networks:
+      - reseau-verification
+
+  frontend:
+    image: python:3.12-slim
+    container_name: facein-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: python -m http.server 3000
+    ports:
+      - "3000:3000"
     networks:
       - reseau-verification
 
