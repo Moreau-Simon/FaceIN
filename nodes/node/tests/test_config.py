@@ -6,14 +6,9 @@ fichier noeuds.yaml ni de l'environnement de la machine, et rien ne fuit
 d'un test à l'autre.
 """
 
-import os
-import sys
-
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from config import charger_configuration  # noqa: E402
+from config import charger_configuration
 
 
 YAML_VALIDE = """\

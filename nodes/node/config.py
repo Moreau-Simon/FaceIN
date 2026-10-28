@@ -28,6 +28,10 @@ CHEMIN_RELATIF = os.path.abspath(
 HOTES_LOCAUX = {"localhost", "127.0.0.1"}
 
 
+class ErreurConfiguration(RuntimeError):
+    """Erreur de lecture ou de validation de la configuration du nœud."""
+
+
 # ---------------------------------------------------------------------------
 # Fichier YAML partagé
 # ---------------------------------------------------------------------------
@@ -38,9 +42,13 @@ def _lire_yaml(chemin: str) -> dict:
         with open(chemin, "r", encoding="utf-8") as fichier:
             return yaml.safe_load(fichier)
     except PermissionError as exc:
-        raise RuntimeError(f"Accès refusé au fichier : {chemin}") from exc
+        raise ErreurConfiguration(
+            f"Accès refusé au fichier : {chemin}"
+        ) from exc
     except yaml.YAMLError as exc:
-        raise RuntimeError(f"Fichier YAML invalide : {chemin}") from exc
+        raise ErreurConfiguration(
+            f"Fichier YAML invalide : {chemin}"
+        ) from exc
 
 
 def _entier_positif(nom: str, valeur: object) -> int:
@@ -49,7 +57,7 @@ def _entier_positif(nom: str, valeur: object) -> int:
     `type(...) is int` rejette aussi les booléens (True est un int en Python).
     """
     if type(valeur) is not int or valeur <= 0:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             f"Paramètre '{nom}' invalide : {valeur!r}. "
             "Un entier strictement positif est attendu"
         )
@@ -76,26 +84,28 @@ def _charger_yaml(chemin: str | None = None) -> dict:
         except FileNotFoundError:
             continue
     else:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             "Fichier de configuration introuvable. Chemins essayés : "
             + ", ".join(candidats)
         )
 
     if not isinstance(config, dict):
-        raise RuntimeError("Configuration YAML vide ou invalide")
+        raise ErreurConfiguration("Configuration YAML vide ou invalide")
 
     consensus = config.get("consensus")
     sync_merkle = config.get("sync_merkle")
     heartbeat = config.get("heartbeat")
 
     if not isinstance(consensus, dict):
-        raise RuntimeError("Section 'consensus' absente ou invalide")
+        raise ErreurConfiguration("Section 'consensus' absente ou invalide")
 
     if not isinstance(sync_merkle, dict):
-        raise RuntimeError("Section 'sync_merkle' absente ou invalide")
+        raise ErreurConfiguration(
+            "Section 'sync_merkle' absente ou invalide"
+        )
 
     if not isinstance(heartbeat, dict):
-        raise RuntimeError("Section 'heartbeat' absente ou invalide")
+        raise ErreurConfiguration("Section 'heartbeat' absente ou invalide")
 
     seuil = consensus.get("seuil_majorite")
     if seuil is not None:
@@ -126,12 +136,12 @@ def _charger_yaml(chemin: str | None = None) -> dict:
 def _valider_port(port: int, contexte: str) -> None:
     """Vérifie qu'un port est dans la plage valide."""
     if type(port) is not int:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             f"Port invalide pour {contexte} : {port!r}. "
             "Un entier est attendu"
         )
     if not 1 <= port <= 65535:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             f"Port hors limites (1-65535) pour {contexte} : {port}"
         )
 
@@ -143,14 +153,14 @@ def _lire_env() -> tuple[str, int, str]:
     peers_raw = os.environ.get("PEERS", "")
 
     if not node_id:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             "NODE_ID manquant : chaque nœud doit avoir une identité"
         )
 
     try:
         node_port = int(node_port_raw)
     except ValueError as exc:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             f"NODE_PORT invalide : {node_port_raw!r}"
         ) from exc
 
@@ -171,7 +181,7 @@ def _parser_peers(peers_raw: str) -> list[dict[str, object]]:
             continue
 
         if peer.count(":") != 1:
-            raise RuntimeError(
+            raise ErreurConfiguration(
                 f"Format de pair invalide : {peer!r}. "
                 "Format attendu : hostname:port"
             )
@@ -180,12 +190,14 @@ def _parser_peers(peers_raw: str) -> list[dict[str, object]]:
         host = host.strip()
 
         if not host:
-            raise RuntimeError(f"Nom d'hôte vide dans le pair : {peer!r}")
+            raise ErreurConfiguration(
+                f"Nom d'hôte vide dans le pair : {peer!r}"
+            )
 
         try:
             port = int(port_raw)
         except ValueError as exc:
-            raise RuntimeError(
+            raise ErreurConfiguration(
                 f"Port invalide pour le pair : {peer!r}"
             ) from exc
 
@@ -194,7 +206,9 @@ def _parser_peers(peers_raw: str) -> list[dict[str, object]]:
         adresse = (host.lower(), port)
 
         if adresse in adresses_vues:
-            raise RuntimeError(f"Pair dupliqué dans PEERS : {peer!r}")
+            raise ErreurConfiguration(
+                f"Pair dupliqué dans PEERS : {peer!r}"
+            )
 
         adresses_vues.add(adresse)
         peers.append({"host": host, "port": port})
@@ -216,7 +230,7 @@ def _verifier_pas_auto_reference(
         est_soi_en_local = host in HOTES_LOCAUX and peer["port"] == node_port
 
         if est_soi_par_nom or est_soi_en_local:
-            raise RuntimeError(
+            raise ErreurConfiguration(
                 f"Le nœud {node_id!r} est listé parmi ses propres pairs "
                 f"({host}:{peer['port']}) : corrigez PEERS"
             )
@@ -239,7 +253,7 @@ def _determiner_seuil(seuil_yaml: int | None, nb_noeuds: int) -> int:
         return minimum
 
     if not minimum <= seuil_yaml <= nb_noeuds:
-        raise RuntimeError(
+        raise ErreurConfiguration(
             f"seuil_majorite={seuil_yaml} incohérent pour {nb_noeuds} nœuds "
             f"(valeur attendue entre {minimum} et {nb_noeuds})"
         )

@@ -1,14 +1,9 @@
 """Tests des ajouts à network/peers.py : clé de pair, seuil du registre,
 transitions retournées, pairs non hors ligne, validation stricte des types."""
 
-import os
-import sys
-
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from network.peers import PeerRegistry, cle_pair  # noqa: E402
+from network.peers import PeerRegistry, cle_pair
 
 
 @pytest.fixture
@@ -126,6 +121,18 @@ def test_identite_differente_pour_la_meme_adresse_est_refusee(registre):
 
     with pytest.raises(ValueError, match="déjà annoncé"):
         registre.record_heartbeat("localhost", 50051, "node-b")
+
+
+def test_identite_meme_casse_differente_est_acceptee_pour_la_meme_adresse(
+    registre,
+):
+    registre.record_heartbeat("localhost", 50051, "node-a")
+
+    registre.record_heartbeat("localhost", 50051, "Node-A")
+
+    pair = registre.get_peer("localhost", 50051)
+    assert pair.node_id == "node-a"
+    assert pair.status == "online"
 
 
 def test_identite_deja_associee_a_une_autre_adresse_est_refusee(registre):

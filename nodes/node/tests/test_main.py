@@ -1,30 +1,28 @@
 """Tests de l'intégration du registre avec les heartbeats de main.py."""
 
 import logging
-import os
-import sys
 from threading import Barrier
-from types import ModuleType
 
 import grpc
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# Les stubs gRPC sont générés par le Dockerfile, pas présents dans le dépôt
-# source lors de l'exécution locale des tests.
-sync_pb2 = ModuleType("sync_pb2")
-sync_pb2_grpc = ModuleType("sync_pb2_grpc")
-sync_pb2_grpc.SyncServiceServicer = object
-sys.modules.setdefault("sync_pb2", sync_pb2)
-sys.modules.setdefault("sync_pb2_grpc", sync_pb2_grpc)
-
-import main as main_module  # noqa: E402
-from network.peers import PeerRegistry  # noqa: E402
+import main as main_module
+from network.peers import PeerRegistry
 
 
 class ErreurHeartbeat(grpc.RpcError):
     pass
+
+
+class ErreurHeartbeatDetaillee(grpc.RpcError):
+    def code(self):
+        return grpc.StatusCode.UNAVAILABLE
+
+    def details(self):
+        return "Connexion refusée"
+
+    def __str__(self):
+        return "détails techniques complets de l'erreur"
 
 
 class ServeurFactice:
@@ -102,6 +100,95 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     assert pair.node_id == node_id_attendu
     assert pair.consecutive_failures == (0 if statut_attendu == "online" else 1)
     assert serveur.arret_demande
+
+
+def test_main_garde_une_raison_courte_et_journalise_les_details_grpc(
+    monkeypatch, caplog
+):
+    caplog.set_level(logging.DEBUG)
+    config = {
+        "node_id": "node-a",
+        "port": 50051,
+        "peers": [{"host": "node-b", "port": 50052}],
+        "timeout_sec_heartbeat": 15,
+        "intervalle_sec_heartbeat": 5,
+    }
+    registre = PeerRegistry()
+    serveur = ServeurFactice()
+
+    def interrompre_cycle(_):
+        raise KeyboardInterrupt
+
+    def envoyer(*args):
+        raise ErreurHeartbeatDetaillee()
+
+    monkeypatch.setattr(main_module, "charger_configuration", lambda: config)
+    monkeypatch.setattr(main_module, "PeerRegistry", lambda: registre)
+    monkeypatch.setattr(
+        main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
+    )
+    monkeypatch.setattr(
+        main_module, "start_grpc_server", lambda node_id, port: serveur
+    )
+    monkeypatch.setattr(main_module, "envoyer_heartbeat", envoyer)
+
+    main_module.main()
+
+    pair = registre.get_peer("node-b", 50052)
+    assert pair.last_error == "UNAVAILABLE: Connexion refusée"
+    assert any(
+        "code=UNAVAILABLE" in record.getMessage()
+        and "détails=Connexion refusée" in record.getMessage()
+        and "détails techniques complets de l'erreur"
+        in record.getMessage()
+        and record.exc_info is not None
+        for record in caplog.records
+    )
+    assert serveur.arret_demande
+
+
+def test_main_signale_une_erreur_de_configuration(monkeypatch, caplog):
+    def charger_configuration_invalide():
+        raise main_module.ErreurConfiguration("NODE_ID manquant")
+
+    monkeypatch.setattr(
+        main_module, "charger_configuration", charger_configuration_invalide
+    )
+
+    with pytest.raises(SystemExit) as erreur:
+        main_module.main()
+
+    assert erreur.value.code == 1
+    assert "Configuration invalide : NODE_ID manquant" in caplog.text
+
+
+def test_main_signale_distinctement_un_echec_de_demarrage_serveur(
+    monkeypatch, caplog
+):
+    config = {
+        "node_id": "node-a",
+        "port": 50051,
+        "peers": [],
+        "timeout_sec_heartbeat": 15,
+        "intervalle_sec_heartbeat": 5,
+    }
+
+    def demarrer_serveur_en_echec(*args):
+        raise main_module.ErreurDemarrageServeur(
+            "[node-a] Impossible d'ouvrir le port gRPC 50051"
+        )
+
+    monkeypatch.setattr(main_module, "charger_configuration", lambda: config)
+    monkeypatch.setattr(
+        main_module, "start_grpc_server", demarrer_serveur_en_echec
+    )
+
+    with pytest.raises(SystemExit) as erreur:
+        main_module.main()
+
+    assert erreur.value.code == 1
+    assert "Échec du démarrage du serveur gRPC" in caplog.text
+    assert "Configuration invalide" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -240,35 +327,46 @@ def test_exception_inattendue_sur_un_pair_n_interrompt_pas_les_autres(
     registre = PeerRegistry()
     serveur = ServeurFactice()
 
-    def interrompre_cycle(_):
-        raise KeyboardInterrupt
+    cycles = 0
 
-    monkeypatch.setattr(main_module, "charger_configuration", lambda: config)
-    monkeypatch.setattr(main_module, "PeerRegistry", lambda: registre)
-    monkeypatch.setattr(
-        main_module, "Event", lambda: EvenementFactice(interrompre_cycle)
-    )
-    monkeypatch.setattr(
-        main_module, "start_grpc_server", lambda node_id, port: serveur
-    )
+    def interrompre_apres_trois_cycles(_):
+        nonlocal cycles
+        cycles += 1
+        if cycles == 3:
+            raise KeyboardInterrupt
 
     def envoyer(node_id, host, port, timeout):
         if host == "node-b":
             raise RuntimeError("erreur inattendue")
         return "node-c", True
 
+    monkeypatch.setattr(main_module, "charger_configuration", lambda: config)
+    monkeypatch.setattr(main_module, "PeerRegistry", lambda: registre)
+    monkeypatch.setattr(
+        main_module,
+        "Event",
+        lambda: EvenementFactice(interrompre_apres_trois_cycles),
+    )
+    monkeypatch.setattr(
+        main_module, "start_grpc_server", lambda node_id, port: serveur
+    )
     monkeypatch.setattr(main_module, "envoyer_heartbeat", envoyer)
 
     main_module.main()
 
-    assert registre.get_peer("node-b", 50052).status == "unknown"
+    pair_en_erreur = registre.get_peer("node-b", 50052)
+    assert pair_en_erreur.status == "unknown"
+    assert pair_en_erreur.consecutive_failures == 0
+    assert pair_en_erreur.last_error is None
     assert registre.get_peer("node-c", 50053).status == "online"
-    assert any(
-        "Erreur inattendue pendant le heartbeat vers node-b:50052"
-        in record.getMessage()
-        and record.exc_info is not None
+    erreurs = [
+        record
         for record in caplog.records
-    )
+        if "Erreur inattendue pendant l'appel heartbeat vers node-b:50052"
+        in record.getMessage()
+    ]
+    assert len(erreurs) == 3
+    assert all(record.exc_info is not None for record in erreurs)
     assert serveur.arret_demande
 
 

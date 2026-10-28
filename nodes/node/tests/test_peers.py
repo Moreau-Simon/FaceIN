@@ -1,15 +1,11 @@
 """Tests de network/peers.py : registre et transitions d'état des pairs."""
 
-import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-import network.peers as peers_module  # noqa: E402
-from network.peers import PeerInfo, PeerRegistry  # noqa: E402
+import network.peers as peers_module
+from network.peers import PeerInfo, PeerRegistry
 
 
 @pytest.fixture

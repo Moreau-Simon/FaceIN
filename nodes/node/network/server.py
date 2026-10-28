@@ -15,6 +15,10 @@ import sync_pb2_grpc
 logger = logging.getLogger(__name__)
 
 
+class ErreurDemarrageServeur(RuntimeError):
+    """Échec du démarrage du serveur gRPC du nœud."""
+
+
 class SyncService(sync_pb2_grpc.SyncServiceServicer):
     """Implémente le service de synchronisation exposé par le noeud."""
 
@@ -48,7 +52,7 @@ def start_grpc_server(node_id, port):
 
     bound_port = server.add_insecure_port(f"0.0.0.0:{port}")
     if bound_port == 0:
-        raise RuntimeError(
+        raise ErreurDemarrageServeur(
             f"[{node_id}] Impossible d'ouvrir le port gRPC {port}"
         )
 

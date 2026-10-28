@@ -100,12 +100,15 @@ class PeerRegistry:
         with self._lock:
             cle = cle_pair(host, port)
             peer = self._require_peer(cle)
-            if peer.node_id is not None and peer.node_id != node_id:
+            if (
+                peer.node_id is not None
+                and peer.node_id.casefold() != node_id.casefold()
+            ):
                 raise ValueError(
                     f"L'adresse {cle!r} a déjà annoncé le node_id "
                     f"{peer.node_id!r}, pas {node_id!r}"
                 )
-            cle_identite = node_id.lower()
+            cle_identite = node_id.casefold()
             autre_cle = self._node_ids.get(cle_identite)
             if autre_cle is not None and autre_cle != cle:
                 raise ValueError(
@@ -113,7 +116,8 @@ class PeerRegistry:
                     f"l'adresse {autre_cle!r}, pas {cle!r}"
                 )
 
-            peer.node_id = node_id
+            if peer.node_id is None:
+                peer.node_id = node_id
             self._node_ids[cle_identite] = cle
             ancien = peer.status
             peer.status = "online"

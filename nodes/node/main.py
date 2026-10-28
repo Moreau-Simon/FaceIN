@@ -15,10 +15,10 @@ from threading import Event
 
 import grpc
 
-from config import charger_configuration
+from config import ErreurConfiguration, charger_configuration
 from network.peer_client import envoyer_heartbeat
 from network.peers import PeerRegistry
-from network.server import start_grpc_server
+from network.server import ErreurDemarrageServeur, start_grpc_server
 
 # ---------------------------------------------------------------------------
 # Configuration des logs
@@ -76,6 +76,21 @@ def _traiter_echec(
     )
 
 
+def _extraire_erreur_grpc(error: grpc.RpcError) -> tuple[str, str, str]:
+    """Retourne une raison concise et les détails utiles au diagnostic."""
+    code_method = getattr(error, "code", None)
+    details_method = getattr(error, "details", None)
+    if not callable(code_method) or not callable(details_method):
+        return str(error), "", ""
+
+    code = code_method()
+    details = details_method()
+    code_texte = getattr(code, "name", str(code)) if code is not None else ""
+    details_texte = details.strip() if isinstance(details, str) else ""
+    raison = ": ".join(part for part in (code_texte, details_texte) if part)
+    return raison or str(error), code_texte, details_texte
+
+
 # ---------------------------------------------------------------------------
 # Programme principal
 # ---------------------------------------------------------------------------
@@ -88,7 +103,12 @@ def main():
     communication avec un pair n'empêche pas le traitement des autres.
     """
 
-    config = charger_configuration()
+    try:
+        config = charger_configuration()
+    except ErreurConfiguration as exc:
+        logger.error("Configuration invalide : %s", exc)
+        raise SystemExit(1) from exc
+
     registre = PeerRegistry()
     for peer in config["peers"]:
         registre.register_peer(peer["host"], peer["port"])
@@ -105,10 +125,14 @@ def main():
         config["peers"],
     )
 
-    server = start_grpc_server(
-        config["node_id"],
-        config["port"],
-    )
+    try:
+        server = start_grpc_server(
+            config["node_id"],
+            config["port"],
+        )
+    except ErreurDemarrageServeur as exc:
+        logger.error("Échec du démarrage du serveur gRPC : %s", exc)
+        raise SystemExit(1) from exc
     logger.info(
         "[%s] Noeud prêt ; %d pair(s) configuré(s)",
         config["node_id"],
@@ -147,7 +171,42 @@ def main():
                     address = f"{peer['host']}:{peer['port']}"
                     try:
                         try:
-                            node_id_pair, en_sante = future.result()
+                            resultat = future.result()
+                        except grpc.RpcError as error:
+                            raison, code, details = _extraire_erreur_grpc(
+                                error
+                            )
+                            logger.debug(
+                                "[%s] Détails de l'erreur gRPC vers %s : "
+                                "code=%s, détails=%s, erreur=%s",
+                                config["node_id"],
+                                address,
+                                code,
+                                details,
+                                error,
+                                exc_info=True,
+                            )
+                            _traiter_echec(
+                                registre,
+                                config["node_id"],
+                                peer["host"],
+                                peer["port"],
+                                raison,
+                                logging.WARNING,
+                            )
+                            continue
+                        except Exception:
+                            logger.exception(
+                                "[%s] Erreur inattendue pendant l'appel "
+                                "heartbeat vers %s ; le traitement des "
+                                "autres pairs continue",
+                                config["node_id"],
+                                address,
+                            )
+                            continue
+
+                        try:
+                            node_id_pair, en_sante = resultat
                             if en_sante:
                                 if (
                                     node_id_pair.strip().casefold()
@@ -178,15 +237,6 @@ def main():
                                     raison,
                                     logging.WARNING,
                                 )
-                        except grpc.RpcError as error:
-                            _traiter_echec(
-                                registre,
-                                config["node_id"],
-                                peer["host"],
-                                peer["port"],
-                                str(error),
-                                logging.WARNING,
-                            )
                         except ValueError as error:
                             _traiter_echec(
                                 registre,
@@ -198,9 +248,9 @@ def main():
                             )
                     except Exception:
                         logger.exception(
-                            "[%s] Erreur inattendue pendant le heartbeat "
-                            "vers %s ; le traitement des autres pairs "
-                            "continue",
+                            "[%s] Erreur inattendue pendant le traitement "
+                            "du heartbeat vers %s ; le traitement des "
+                            "autres pairs continue",
                             config["node_id"],
                             address,
                         )
@@ -224,8 +274,4 @@ def main():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    try:
-        main()
-    except RuntimeError as exc:
-        logger.error("Configuration invalide : %s", exc)
-        raise SystemExit(1)
+    main()
