@@ -227,6 +227,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Générer les certificats TLS de test
+        run: |
+          bash scripts/generate-test-certs.sh
+          echo "TLS_CA_CERT_HOST_PATH=./certs/ca.crt" >> "$GITHUB_ENV"
+
       # Clé de vérification ZKP : nécessaire au build de l'image API uniquement
       - name: Récupérer la clé de vérification du circuit
         if: needs.detect.outputs.api == 'true'

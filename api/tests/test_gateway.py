@@ -9,6 +9,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 # Ajout du répertoire api au path pour les imports directs
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -156,6 +158,86 @@ class TestGrpcBridge(unittest.TestCase):
         nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
         self.assertIsNone(nonce)
         self.assertIsNone(exp)
+
+    def test_api_uses_mutual_tls_for_nonce_and_verification(self):
+        with tempfile.TemporaryDirectory() as cert_dir:
+            paths = {
+                "TLS_CA_CERT": os.path.join(cert_dir, "ca.crt"),
+                "TLS_CERT": os.path.join(cert_dir, "api.crt"),
+                "TLS_KEY": os.path.join(cert_dir, "api.key"),
+            }
+            contents = {
+                paths["TLS_CA_CERT"]: b"ca",
+                paths["TLS_CERT"]: b"api certificate",
+                paths["TLS_KEY"]: b"api private key",
+            }
+            for path, content in contents.items():
+                with open(path, "wb") as cert_file:
+                    cert_file.write(content)
+
+            responses = [
+                SimpleNamespace(
+                    accepte=True,
+                    token="token",
+                    raison_refus="",
+                ),
+                SimpleNamespace(nonce="nonce-123", expiration_timestamp=123456),
+            ]
+
+            class VerificationStub:
+                def __init__(self, channel):
+                    self.channel = channel
+
+                def VerifierPreuve(self, request, timeout):
+                    return responses.pop(0)
+
+                def DemanderNonce(self, request, timeout):
+                    return responses.pop(0)
+
+            credentials = object()
+            channel = SimpleNamespace(close=lambda: None)
+            with patch.dict(
+                os.environ, {**paths, "TLS_ENABLED": "true"}, clear=False
+            ), patch.object(
+                grpc_bridge.grpc,
+                "ssl_channel_credentials",
+                return_value=credentials,
+            ) as ssl_credentials, patch.object(
+                grpc_bridge.grpc,
+                "secure_channel",
+                return_value=channel,
+            ) as secure_channel, patch.object(
+                grpc_bridge.verification_pb2_grpc,
+                "VerificationServiceStub",
+                VerificationStub,
+            ):
+                result = grpc_bridge.verify_on_nodes(
+                    "alice",
+                    json.dumps({"proof": "test"}),
+                    "nonce-123",
+                    nodes=[{"id": "node-a", "host": "node-a", "port": 50051}],
+                )
+                nonce, expiration = grpc_bridge.request_nonce_from_node(
+                    "alice",
+                    nodes=[{"id": "node-a", "host": "node-a", "port": 50051}],
+                )
+
+            self.assertTrue(result["consensus"])
+            self.assertEqual((nonce, expiration), ("nonce-123", 123456))
+            self.assertEqual(secure_channel.call_count, 2)
+            self.assertEqual(
+                [call.args[0] for call in secure_channel.call_args_list],
+                ["node-a:50051", "node-a:50051"],
+            )
+            self.assertEqual(ssl_credentials.call_count, 2)
+            self.assertEqual(
+                ssl_credentials.call_args.kwargs,
+                {
+                    "root_certificates": b"ca",
+                    "private_key": b"api private key",
+                    "certificate_chain": b"api certificate",
+                },
+            )
 
 
 class TestJwtManager(unittest.TestCase):
@@ -349,4 +431,3 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -126,9 +126,13 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
         def add_insecure_port(self, adresse):
             return 50051
 
+        def add_secure_port(self, adresse, credentials):
+            return 50051
+
         def start(self):
             return None
 
+    monkeypatch.setenv("TLS_ENABLED", "false")
     enregistres = {}
     monkeypatch.setattr(server_module.grpc, "server", lambda executor: ServeurFactice())
     monkeypatch.setattr(
@@ -157,3 +161,75 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
     )
 
     assert enregistres["verification"]._store is store
+
+
+def test_demarrage_ouvre_un_port_tls_mutuel(monkeypatch, tmp_path):
+    class ServeurFactice:
+        def add_secure_port(self, adresse, credentials):
+            self.adresse = adresse
+            self.credentials = credentials
+            return 50051
+
+        def start(self):
+            return None
+
+    ca = tmp_path / "ca.crt"
+    cert = tmp_path / "node.crt"
+    key = tmp_path / "node.key"
+    ca.write_bytes(b"ca")
+    cert.write_bytes(b"certificate")
+    key.write_bytes(b"private-key")
+
+    monkeypatch.setenv("TLS_ENABLED", "true")
+    monkeypatch.setenv("TLS_CA_CERT", str(ca))
+    monkeypatch.setenv("TLS_CERT", str(cert))
+    monkeypatch.setenv("TLS_KEY", str(key))
+
+    serveur = ServeurFactice()
+    monkeypatch.setattr(server_module.grpc, "server", lambda executor: serveur)
+    monkeypatch.setattr(
+        server_module.sync_pb2_grpc,
+        "add_SyncServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.consensus_pb2_grpc,
+        "add_ConsensusServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        server_module.verification_pb2_grpc,
+        "add_VerificationServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    credentials = object()
+    appels_credentials = {}
+
+    def credentials_tls(pairs, root_certificates, require_client_auth):
+        appels_credentials.update(
+            pairs=pairs,
+            root_certificates=root_certificates,
+            require_client_auth=require_client_auth,
+        )
+        return credentials
+
+    monkeypatch.setattr(
+        server_module.grpc, "ssl_server_credentials", credentials_tls
+    )
+
+    server_module.start_grpc_server(
+        "node-a",
+        50051,
+        lambda *args: True,
+        NonceStore(),
+        lambda demande: True,
+        lambda utilisateur_id: "token",
+    )
+
+    assert serveur.adresse == "0.0.0.0:50051"
+    assert serveur.credentials is credentials
+    assert appels_credentials == {
+        "pairs": [(b"private-key", b"certificate")],
+        "root_certificates": b"ca",
+        "require_client_auth": True,
+    }

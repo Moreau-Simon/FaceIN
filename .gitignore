@@ -242,3 +242,11 @@ api/facein.db
 #ajout supplementaire
 FaceIN.code-workspace
 .venv312
+
+
+# Clés et certificats privés de développement
+/ca.key
+/certs/
+*.key
+*.csr
+*.srl

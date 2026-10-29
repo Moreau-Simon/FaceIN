@@ -12,6 +12,9 @@ try:
 except ImportError:
     grpc = None
 
+import os
+from pathlib import Path
+
 import sync_pb2
 import sync_pb2_grpc
 import consensus_pb2
@@ -23,6 +26,37 @@ from consensus.validation import empaqueter_preuve
 
 logger = logging.getLogger(__name__)
 
+def _tls_enabled() -> bool:
+    return os.getenv("TLS_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def charger_credentials_serveur():
+    """Charge les certificats TLS du nœud courant."""
+    ca_path = os.getenv("TLS_CA_CERT", "/app/certs/ca.crt")
+    cert_path = os.getenv("TLS_CERT")
+    key_path = os.getenv("TLS_KEY")
+
+    if not cert_path or not key_path:
+        raise ErreurDemarrageServeur(
+            "TLS_CERT et TLS_KEY doivent être configurés"
+        )
+
+    try:
+        ca = Path(ca_path).read_bytes()
+        cert = Path(cert_path).read_bytes()
+        key = Path(key_path).read_bytes()
+    except OSError as exc:
+        raise ErreurDemarrageServeur(
+            f"Impossible de charger les certificats TLS : {exc}"
+        ) from exc
+
+    return grpc.ssl_server_credentials(
+        [(key, cert)],
+        root_certificates=ca,
+        require_client_auth=True,
+    )
 
 class ErreurDemarrageServeur(RuntimeError):
     """Échec du démarrage du serveur gRPC du nœud."""
@@ -189,7 +223,13 @@ def start_grpc_server(
         server,
     )
 
-    bound_port = server.add_insecure_port(f"0.0.0.0:{port}")
+    if _tls_enabled():
+        credentials = charger_credentials_serveur()
+        bound_port = server.add_secure_port(
+            f"0.0.0.0:{port}", credentials
+        )
+    else:
+        bound_port = server.add_insecure_port(f"0.0.0.0:{port}")
     if bound_port == 0:
         raise ErreurDemarrageServeur(
             f"[{node_id}] Impossible d'ouvrir le port gRPC {port}"

@@ -10,6 +10,7 @@ import logging
 import os
 import json
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 # ==============================================================================
@@ -59,6 +60,28 @@ SEUIL_MAJORITE = 2  # Au moins 2 noeuds sur 3 doivent valider la preuve
 TIMEOUT_NOEUD_SECONDES = 3.0
 
 
+def _creer_canal(target: str):
+    """Crée un canal gRPC en TLS mutuel lorsque TLS est activé."""
+    tls_enabled = os.getenv("TLS_ENABLED", "false").strip().lower()
+    if tls_enabled not in {"1", "true", "yes", "on"}:
+        return grpc.insecure_channel(target)
+
+    ca_path = os.getenv("TLS_CA_CERT", "/app/certs/ca.crt")
+    cert_path = os.getenv("TLS_CERT")
+    key_path = os.getenv("TLS_KEY")
+    if not cert_path or not key_path:
+        raise RuntimeError(
+            "TLS_CERT et TLS_KEY doivent être configurés quand TLS_ENABLED=true"
+        )
+
+    credentials = grpc.ssl_channel_credentials(
+        root_certificates=Path(ca_path).read_bytes(),
+        private_key=Path(key_path).read_bytes(),
+        certificate_chain=Path(cert_path).read_bytes(),
+    )
+    return grpc.secure_channel(target, credentials)
+
+
 def _verifier_noeud_unitaire(
     node: dict[str, Any],
     user_id: str,
@@ -86,7 +109,7 @@ def _verifier_noeud_unitaire(
         return node_id, True, "token-simule", ""
 
     try:
-        channel = grpc.insecure_channel(target)
+        channel = _creer_canal(target)
         stub = verification_pb2_grpc.VerificationServiceStub(channel)
 
         # Encodage sécurisé de la preuve Groth16 en bytes pour conformité Protobuf
@@ -284,7 +307,7 @@ def request_nonce_from_node(
         target = f"{host}:{port}"
 
         try:
-            channel = grpc.insecure_channel(target)
+            channel = _creer_canal(target)
             stub = verification_pb2_grpc.VerificationServiceStub(channel)
 
             demande = verification_pb2.DemandeNonce(utilisateur_id=user_id)
@@ -321,4 +344,3 @@ def request_nonce_from_node(
 
     logger.warning("Aucun noeud gRPC n'a pu délivrer de nonce.")
     return None, None
-

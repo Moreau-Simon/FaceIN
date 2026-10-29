@@ -4,6 +4,8 @@ Client gRPC utilisé par CE noeud pour appeler ses pairs
 """
 import logging
 import time
+import os
+from pathlib import Path
 
 import grpc
 
@@ -14,6 +16,37 @@ import sync_pb2_grpc
 
 logger = logging.getLogger(__name__)
 
+def _tls_enabled() -> bool:
+    return os.getenv("TLS_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def creer_canal_securise(address: str):
+    """Crée un canal gRPC avec authentification mutuelle TLS."""
+    if not _tls_enabled():
+        return grpc.insecure_channel(address)
+
+    ca_path = os.getenv("TLS_CA_CERT", "/app/certs/ca.crt")
+    cert_path = os.getenv("TLS_CERT")
+    key_path = os.getenv("TLS_KEY")
+
+    if not cert_path or not key_path:
+        raise RuntimeError(
+            "TLS_CERT et TLS_KEY doivent être configurés"
+        )
+
+    ca = Path(ca_path).read_bytes()
+    cert = Path(cert_path).read_bytes()
+    key = Path(key_path).read_bytes()
+
+    credentials = grpc.ssl_channel_credentials(
+        root_certificates=ca,
+        private_key=key,
+        certificate_chain=cert,
+    )
+
+    return grpc.secure_channel(address, credentials)
 
 def envoyer_heartbeat(node_id, host, port, timeout_sec) -> tuple[str, bool]:
     """Appelle le heartbeat d'un pair avec un délai maximal configuré.
@@ -29,7 +62,7 @@ def envoyer_heartbeat(node_id, host, port, timeout_sec) -> tuple[str, bool]:
         address,
     )
 
-    with grpc.insecure_channel(address) as channel:
+    with creer_canal_securise(address) as channel:
         stub = sync_pb2_grpc.SyncServiceStub(channel)
 
         response = stub.Heartbeat(
@@ -63,7 +96,7 @@ def demander_vote(
 ) -> tuple[str, bool]:
     """Demande le vote d'un pair et refuse une réponse à une autre demande."""
     address = f"{host}:{port}"
-    with grpc.insecure_channel(address) as channel:
+    with creer_canal_securise(address) as channel:
         stub = consensus_pb2_grpc.ConsensusServiceStub(channel)
         reponse = stub.DemanderVote(demande, timeout=timeout_sec)
 
