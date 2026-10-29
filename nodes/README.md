@@ -108,3 +108,114 @@ associations :
 docker compose down
 docker compose up --build
 ```
+
+## Configuration TLS/mTLS des nœuds
+
+FaceIN utilise le mTLS (Mutual Transport Layer Security) pour sécuriser les communications gRPC entre les nœuds du réseau et l'API. Les communications sont chiffrées et chaque composant doit présenter un certificat valide signé par l'autorité de certification (CA) interne.
+
+### 1. Récupérer la CA interne
+
+Pour l'environnement de test, les fichiers de la CA sont partagés sur le Discord du projet, dans les messages épinglés.
+
+Récupérer les fichiers suivants :
+
+ca.crt : certificat public de l'autorité de certification.
+ca.key : clé privée utilisée pour signer les certificats.
+
+Placer les fichiers aux emplacements suivants :
+```bash
+text
+FaceIN/
+├── ca.key
+└── nodes/
+    └── infra/
+        └── tls/
+            └── ca.crt
+```
+
+Le fichier ca.key doit être placé à la racine du projet, au même niveau que docker-compose.yml. Le certificat public ca.crt doit être placé dans nodes/infra/tls/ca.crt.
+
+Attention : ca.key permet de signer des certificats reconnus par les composants qui font confiance à cette CA. Cette clé est partagée uniquement pour les besoins de l'environnement de test et ne doit pas être utilisée en production.
+### 2. Prérequis
+
+Avant de générer les certificats, vérifier que les éléments suivants sont disponibles :
+
+Windows avec PowerShell.
+OpenSSL installé et accessible depuis le terminal.
+Les fichiers ca.key et nodes/infra/tls/ca.crt.
+Le script creation_certs.ps1 à la racine du projet.
+
+Vérifier qu'OpenSSL fonctionne :
+
+powershell
+openssl version
+
+### 3. Générer les certificats
+
+Depuis la racine du projet FaceIN, exécuter :
+
+powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\creation_certs.ps1
+
+
+Cette modification de la politique d'exécution s'applique uniquement à la session PowerShell courante.
+
+Le script génère les certificats et les clés privées nécessaires aux composants configurés, notamment :
+
+node-a
+node-b
+node-c
+api-gateway
+
+Les certificats doivent être signés par la CA interne et contenir les SAN (Subject Alternative Names) correspondant aux noms DNS utilisés par les services dans Docker.
+
+### 4. Organisation des fichiers
+
+Exemple d'organisation du projet :
+```bashtext
+FaceIN/
+├── ca.key
+├── creation_certs.ps1
+├── certs/
+│   ├── node-a.crt
+│   ├── node-a.key
+│   ├── node-b.crt
+│   ├── node-b.key
+│   ├── node-c.crt
+│   ├── node-c.key
+│   ├── api-gateway.crt
+│   └── api-gateway.key
+├── nodes/
+│   └── infra/
+│       └── tls/
+│           └── ca.crt
+└── docker-compose.yml
+```
+
+Les fichiers .crt contiennent les certificats. Les fichiers .key contiennent les clés privées associées.
+
+Chaque conteneur doit disposer de son propre certificat et de sa clé privée, ainsi que du certificat public ca.crt. Les chemins utilisés dans Docker Compose doivent correspondre à ceux configurés dans le code Python.
+
+### 5. Protection des fichiers
+
+Les clés privées et les fichiers intermédiaires ne doivent pas être ajoutés au dépôt Git.
+
+Ajouter les règles suivantes au .gitignore :
+
+```bash
+gitignore
+/ca.key
+/certs/
+*.key
+*.csr
+*.srl
+```
+
+Le certificat public ca.crt peut être versionné dans le dépôt.
+
+### 6. Environnement de test et production
+
+La CA actuelle est destinée aux tests du projet. Sa clé privée ayant été partagée sur Discord, toute personne qui l'a récupérée pourrait signer des certificats reconnus par les composants qui lui font confiance.
+
+Pour un environnement de production, il faudra créer une nouvelle CA dont la clé privée sera conservée dans un emplacement sécurisé et ne sera jamais partagée. Les certificats des composants devront alors être régénérés et signés par cette nouvelle CA.

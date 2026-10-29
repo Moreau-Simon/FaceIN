@@ -38,7 +38,8 @@ RUN python -m grpc_tools.protoc \
 
 # 5. Copie de la clé de vérification du circuit ZKP
 RUN mkdir -p /app/circuits/build
-COPY circuits/build/verification_key.json* /app/circuits/build/
+#COPY circuits/build/verification_key.json* /app/circuits/build/
+COPY nodes/shared/verification_key.json /app/circuits/build/verification_key.json
 
 # Exposition du port standard de l'API Gateway
 EXPOSE 8000
