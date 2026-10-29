@@ -25,7 +25,7 @@ services:
       - TLS_CERT=/app/certs/node-a.crt
       - TLS_KEY=/app/certs/node-a.key
     volumes:
-      - ./nodes/infra/tls/ca.crt:/app/certs/ca.crt:ro
+      - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-a.crt:/app/certs/node-a.crt:ro
       - ./certs/node-a.key:/app/certs/node-a.key:ro
 
@@ -51,7 +51,7 @@ services:
       - TLS_CERT=/app/certs/node-b.crt
       - TLS_KEY=/app/certs/node-b.key
     volumes:
-      - ./nodes/infra/tls/ca.crt:/app/certs/ca.crt:ro
+      - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-b.crt:/app/certs/node-b.crt:ro
       - ./certs/node-b.key:/app/certs/node-b.key:ro
     ports:
@@ -76,7 +76,7 @@ services:
       - TLS_CERT=/app/certs/node-c.crt
       - TLS_KEY=/app/certs/node-c.key
     volumes:
-      - ./nodes/infra/tls/ca.crt:/app/certs/ca.crt:ro
+      - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-c.crt:/app/certs/node-c.crt:ro
       - ./certs/node-c.key:/app/certs/node-c.key:ro
     ports:
@@ -101,7 +101,7 @@ services:
       - TLS_CERT=/app/certs/api-gateway.crt
       - TLS_KEY=/app/certs/api-gateway.key
     volumes:
-      - ./nodes/infra/tls/ca.crt:/app/certs/ca.crt:ro
+      - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/api-gateway.crt:/app/certs/api-gateway.crt:ro
       - ./certs/api-gateway.key:/app/certs/api-gateway.key:ro
     networks:
