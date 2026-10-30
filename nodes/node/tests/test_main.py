@@ -81,11 +81,21 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     def demarrer_serveur(
         node_id, port, verifier, nonces, decider_fn, fabriquer_token
     ):
+        decision = decider_fn(
+            SimpleNamespace(
+                id_demande="requete-123",
+                utilisateur_id="user-1",
+                preuve_zkp=b"preuve",
+                nonce="nonce-123",
+                service_cible="service-1",
+            )
+        )
         dependances_serveur.update(
             verifier=verifier,
             nonces=nonces,
             decider_fn=decider_fn,
             fabriquer_token=fabriquer_token,
+            decision=decision,
         )
         return serveur
 
@@ -130,17 +140,11 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     assert callable(dependances_serveur["decider_fn"])
     assert callable(dependances_serveur["fabriquer_token"])
 
-    decision = dependances_serveur["decider_fn"](
-        SimpleNamespace(
-            id_demande="requete-123",
-            utilisateur_id="user-1",
-            preuve_zkp=b"preuve",
-            nonce="nonce-123",
-            service_cible="service-1",
-        )
-    )
-    assert decision is True
-    assert appels_vote == [("node-b", 50052, "requete-123", 1.5)]
+    assert dependances_serveur["decision"] is True
+    assert len(appels_vote) == 1
+    host, port, id_demande, timeout_s = appels_vote[0]
+    assert (host, port, id_demande) == ("node-b", 50052, "requete-123")
+    assert 0 < timeout_s <= 1.5
     assert serveur.arret_demande
 
 

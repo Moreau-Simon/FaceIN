@@ -11,14 +11,131 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from concurrent.futures import (
+    CancelledError,
+    Future,
+    FIRST_COMPLETED,
     ThreadPoolExecutor,
     TimeoutError,
-    as_completed,
+    wait,
 )
-from typing import List, Union
+from threading import BoundedSemaphore
+from typing import Any, Callable, List, Union
+
+import grpc
 
 logger = logging.getLogger(__name__)
+
+
+class VoteExecutor:
+    """Pool partagé pour les votes, avec une limite aux tâches en attente."""
+
+    def __init__(self, max_workers: int, max_pending: int):
+        if max_workers < 1 or max_pending < 0:
+            raise ValueError(
+                "max_workers doit être positif et max_pending positif ou nul"
+            )
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="vote-pair",
+        )
+        self._capacity = BoundedSemaphore(max_workers + max_pending)
+
+    def submit(
+        self,
+        function: Callable[..., Any],
+        *args: Any,
+        timeout_s: float,
+    ) -> Future[Any] | None:
+        """Soumet une tâche sans dépasser la capacité bornée du pool."""
+        if not self._capacity.acquire(timeout=max(0.0, timeout_s)):
+            return None
+
+        try:
+            future = self._executor.submit(function, *args)
+        except RuntimeError:
+            self._capacity.release()
+            raise
+
+        future.add_done_callback(lambda _: self._capacity.release())
+        return future
+
+    def close(self) -> None:
+        """Ferme le pool et attend la fin des appels gRPC en cours."""
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+
+def _adresse_vote(pair: Any) -> str:
+    host = getattr(pair, "host", None)
+    port = getattr(pair, "port", None)
+    if host is not None and port is not None:
+        host = str(host)
+        if ":" in host and not (host.startswith("[") and host.endswith("]")):
+            host = f"[{host}]"
+        return f"{host}:{port}"
+    return str(pair)
+
+
+def _extraire_vote(resultat: Any) -> bool:
+    vote = resultat[1] if isinstance(resultat, tuple) else resultat
+    if type(vote) is not bool:
+        raise ValueError(f"Vote invalide : {vote!r}")
+    return vote
+
+
+def _interroger_avec_echeance(
+    interroger_pair: Callable[..., Any],
+    pair: Any,
+    demande: Any,
+    echeance: float,
+) -> Any:
+    timeout_s = echeance - time.monotonic()
+    if timeout_s <= 0:
+        raise TimeoutError("Délai du consensus dépassé avant l'appel gRPC")
+    return interroger_pair(pair, demande, timeout_s)
+
+
+def _journaliser_resultat_vote(pair: Any, future: Future[Any]) -> None:
+    adresse = _adresse_vote(pair)
+    if future.cancelled():
+        logger.debug(
+            "Appel de vote vers %s annulé avant son démarrage",
+            adresse,
+        )
+        return
+
+    try:
+        vote = _extraire_vote(future.result())
+    except grpc.RpcError as error:
+        code = error.code()
+        if code == grpc.StatusCode.DEADLINE_EXCEEDED:
+            logger.warning(
+                "Délai gRPC dépassé pour le vote demandé à %s",
+                adresse,
+            )
+        else:
+            logger.warning(
+                "Échec gRPC du vote demandé à %s (code=%s, détails=%s)",
+                adresse,
+                code,
+                error.details(),
+            )
+    except TimeoutError:
+        logger.warning("Délai dépassé pour le vote demandé à %s", adresse)
+    except Exception as error:
+        logger.error(
+            "Erreur inattendue pendant le vote demandé à %s : %s",
+            adresse,
+            error,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+    else:
+        logger.debug(
+            "Vote %s reçu de %s",
+            "POUR" if vote else "CONTRE",
+            adresse,
+        )
 
 
 def _localiser_verification_key() -> str:
@@ -273,11 +390,21 @@ class VerificateurZKP:
         return True
 
 
-def decider(demande, pairs, verifier_local, interroger_pair, seuil, timeout_s):
+def decider(
+    demande,
+    pairs,
+    verifier_local,
+    interroger_pair,
+    seuil,
+    timeout_s,
+    vote_executor: VoteExecutor,
+):
     """Retourne True si le seuil de votes POUR (initiateur inclus) est atteint.
 
     ``interroger_pair`` peut retourner un booléen ou le tuple
     ``(node_id, vote)`` renvoyé par le client gRPC.
+    Les appels distants partagent ``vote_executor`` et sont bornés par
+    ``timeout_s`` ainsi que par la capacité de ce pool.
     """
     pour = (
         1
@@ -292,21 +419,74 @@ def decider(demande, pairs, verifier_local, interroger_pair, seuil, timeout_s):
     if pour >= seuil:
         return True
 
-    pool = ThreadPoolExecutor(max_workers=max(1, len(pairs)))
-    futures = [pool.submit(interroger_pair, p, demande, timeout_s) for p in pairs]
+    echeance = time.monotonic() + timeout_s
+    futures: dict[Future[Any], Any] = {}
+    for pair in pairs:
+        restant = echeance - time.monotonic()
+        if restant <= 0:
+            logger.warning(
+                "Délai global du consensus dépassé avant l'envoi du vote à %s",
+                _adresse_vote(pair),
+            )
+            break
+        try:
+            futur = vote_executor.submit(
+                _interroger_avec_echeance,
+                interroger_pair,
+                pair,
+                demande,
+                echeance,
+                timeout_s=restant,
+            )
+        except RuntimeError:
+            logger.exception(
+                "Impossible de soumettre le vote demandé à %s",
+                _adresse_vote(pair),
+            )
+            continue
+        if futur is None:
+            logger.warning(
+                "Capacité du pool de votes saturée pour %s",
+                _adresse_vote(pair),
+            )
+            continue
+        futur.add_done_callback(
+            lambda completed, pair=pair: _journaliser_resultat_vote(
+                pair, completed
+            )
+        )
+        futures[futur] = pair
+
+    en_attente = set(futures)
     try:
-        for futur in as_completed(futures, timeout=timeout_s):
-            try:
-                resultat = futur.result()
-                vote = resultat[1] if isinstance(resultat, tuple) else resultat
-                if vote is True:
+        while en_attente:
+            restant = echeance - time.monotonic()
+            if restant <= 0:
+                logger.warning("Délai global du consensus dépassé")
+                break
+            termines, en_attente = wait(
+                en_attente,
+                timeout=restant,
+                return_when=FIRST_COMPLETED,
+            )
+            if not termines:
+                logger.warning("Délai global du consensus dépassé")
+                break
+            for futur in termines:
+                try:
+                    vote = _extraire_vote(futur.result())
+                except CancelledError:
+                    continue
+                except Exception:
+                    continue
+                if vote:
                     pour += 1
-            except Exception:
-                continue
-            if pour >= seuil:
-                return True
-    except TimeoutError:
-        pass
+                if pour >= seuil:
+                    for restant_futur in en_attente:
+                        restant_futur.cancel()
+                    return True
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+        for futur in en_attente:
+            futur.cancel()
+
     return False

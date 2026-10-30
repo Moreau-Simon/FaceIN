@@ -19,7 +19,7 @@ import grpc
 from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
-from consensus.validation import decider, VerificateurZKP
+from consensus.validation import VoteExecutor, decider, VerificateurZKP
 from network.peer_client import demander_vote, envoyer_heartbeat
 from network.peers import PeerRegistry, formater_adresse_pair
 from network.server import ErreurDemarrageServeur, start_grpc_server
@@ -120,6 +120,10 @@ def main():
     nonces = NonceStore()
     store = EngagementsStore()
     verifier = VerificateurZKP(store)
+    vote_executor = VoteExecutor(
+        max_workers=min(10, max(1, len(config["peers"]))),
+        max_pending=10,
+    )
 
     def interroger_pair(pair, demande, timeout_s):
         return demander_vote(
@@ -137,6 +141,7 @@ def main():
             interroger_pair,
             config["seuil_majorite"],
             config["timeout_ms_consensus"] / 1000,
+            vote_executor,
         )
 
     logger.info(
@@ -167,6 +172,7 @@ def main():
             lambda utilisateur_id: secrets.token_urlsafe(32),
         )
     except ErreurDemarrageServeur as exc:
+        vote_executor.close()
         logger.error("Échec du démarrage du serveur gRPC : %s", exc)
         raise SystemExit(1) from exc
         
@@ -300,6 +306,7 @@ def main():
         arret_demande.set()
     finally:
         server.stop(0).wait()
+        vote_executor.close()
         for signe, gestionnaire in gestionnaires_precedents.items():
             signal.signal(signe, gestionnaire)
         logger.info(
