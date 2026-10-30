@@ -2,10 +2,12 @@
 Route de génération de nonce anti-rejeu éphémère.
 
 Fournit au client un défi cryptographique aléatoire de 32 octets (64 caractères hexadécimaux)
-valide pendant 60 secondes pour la construction de la preuve ZKP.
+valide pendant 60 secondes pour la construction de la preuve ZKP, accompagné d'une liste
+aléatoire de défis de vie (liveness) à exécuter devant la caméra avant la capture biométrique.
 """
 
 import logging
+import random
 import secrets
 import time
 from fastapi import APIRouter
@@ -24,17 +26,26 @@ router = APIRouter()
 
 DUREE_NONCE_SECONDES = 60
 
+# --- Nouveau : défis de vie supportés par le frontend (clés reconnues par liveness.js) ---
+DEFIS_DISPONIBLES = ["blink", "turn_left", "turn_right", "smile"]
+NOMBRE_DEFIS = 2
+
 
 class NonceResponse(BaseModel):
     nonce: str = Field(..., description="Valeur hexadécimale aléatoire anti-rejeu")
     expires_at: int = Field(..., description="Timestamp Unix d'expiration (en secondes)")
+    defis: list = Field(
+        default_factory=list,
+        description="Défis de vie (liveness) aléatoires à exécuter avant la capture",
+    )
 
 
 @router.get(
     "/nonce/{user_id}",
     response_model=NonceResponse,
-    summary="Génération d'un nonce anti-rejeu",
-    description="Génère ou récupère un nonce à usage unique valide pendant 60 secondes pour un utilisateur donné.",
+    summary="Génération d'un nonce anti-rejeu + défis de vie",
+    description="Génère un nonce à usage unique valide 60 s, accompagné d'une liste "
+    "aléatoire de défis de vie que le client doit exécuter devant la caméra.",
 )
 def get_nonce(user_id: str) -> NonceResponse:
     user_id_clean = user_id.strip()
@@ -60,7 +71,12 @@ def get_nonce(user_id: str) -> NonceResponse:
     # 2. Enregistrement en SQLite pour double vérification par la passerelle API
     save_nonce(nonce=nonce, user_id=user_id_clean, expires_at=float(expires_at))
 
+    # 3. --- Nouveau : tirage aléatoire des défis de vie ---
+    defis = random.sample(DEFIS_DISPONIBLES, k=min(NOMBRE_DEFIS, len(DEFIS_DISPONIBLES)))
+    logger.info("Défis de vie imposés à '%s' : %s", user_id_clean, ", ".join(defis))
+
     return NonceResponse(
         nonce=nonce,
         expires_at=int(expires_at),
+        defis=defis,
     )

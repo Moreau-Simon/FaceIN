@@ -62,6 +62,11 @@
                 <p class="form-hint">Entrez le pseudo utilisé lors de votre inscription sur cet appareil.</p>
             </div>
 
+            <!-- Processus d'authentification biométrique Zero-Knowledge -->
+            <p class="form-hint">
+                Le processus d'authentification utilise la technologie Zero-Knowledge (ZKP) pour prouver votre identité sans révéler votre visage.
+            </p>
+
             <!-- Flux Webcam & Canvas d'overlay -->
             <div class="video-wrapper">
                 <video id="video-auth" class="video-element" autoplay playsinline muted></video>
@@ -117,6 +122,7 @@
 <script src="js/storage.js"></script>
 <script src="js/face-capture.js"></script>
 <script src="js/zkp-engine.js"></script>
+<script src="js/liveness.js"></script>
 <script src="js/facein-core.js"></script>
 
 </body>

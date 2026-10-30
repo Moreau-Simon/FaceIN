@@ -213,12 +213,13 @@ class FaceInCore {
     }
 
     /**
-     * Processus d'authentification biométrique Zero-Knowledge
-     * 1. Récupération du vecteur de référence depuis IndexedDB
-     * 2. Capture du visage actuel
-     * 3. Demande du nonce anti-rejeu au serveur
-     * 4. Calcul de l'engagement et génération de la preuve Groth16
-     * 5. Envoi de la preuve au serveur pour vérification
+    * Processus d'authentification biométrique Zero-Knowledge
+    * 1. Récupération du vecteur de référence depuis IndexedDB
+    * 2. Demande du nonce anti-rejeu et des défis de vie au serveur
+    * 3. Capture du visage actuel (avec test de vie anti-photo)
+    * 4. Calcul de l'engagement de référence
+    * 5. Génération de la preuve ZPK
+    * 6. Envoi de la preuve au serveur pour vérification
      * @param {string} userId - Identifiant de l'utilisateur
      */
     async authenticate(userId) {
@@ -245,13 +246,9 @@ class FaceInCore {
             }
             this.log(`[Connexion] Vecteur original récupéré depuis IndexedDB.`);
 
-            // Étape 2 : Capture du visage actuel
-            this.updateStatus("Capture du visage...", false, 'auth');
-            this.log(`[Connexion] Capture du visage actuel (vecteur du jour)...`);
-            const currentVector = await window.FaceCapture.captureDescriptor();
-            this.log(`[Connexion] Vecteur actuel extrait.`);
-
-            // Étape 3 : Demande du nonce anti-rejeu auprès du serveur
+            // Étape 2 : Demande du nonce anti-rejeu + défis de vie auprès du serveur
+            // (AVANT la capture : les défis doivent être imposés par le serveur,
+            //  aléatoires et frais — le nonce vit 60 s, le test de vie ~18 s max)
             this.updateStatus("Demande du nonce anti-rejeu...", false, 'auth');
             const nonceUrl = `${window.CONFIG.API_BASE_URL}/nonce/${encodeURIComponent(userId)}`;
             this.log(`[Connexion] GET ${nonceUrl}`);
@@ -268,7 +265,19 @@ class FaceInCore {
 
             const nonceData = await nonceResp.json();
             const nonce = nonceData.nonce || nonceData;
+            const defis = Array.isArray(nonceData.defis) ? nonceData.defis : [];
             this.log(`[Connexion] Nonce anti-rejeu obtenu: ${nonce}`);
+            this.log(`[Connexion] Défis de vie imposés par le serveur : ${defis.join(', ') || 'aucun'}`);
+
+            // Étape 3 : Capture du visage actuel AVEC test de vie anti-photo
+            this.updateStatus("Capture du visage (suivez les instructions)...", false, 'auth');
+            this.log(`[Connexion] Capture du visage actuel avec test de vie...`);
+            const currentVector = await window.FaceCapture.captureDescriptor({
+                defis: defis,
+                onStatus: (msg) => this.updateStatus(msg, false, 'auth'),
+                onErreur: (msg) => this.log(`[Liveness] ${msg}`, "warn"),
+            });
+            this.log(`[Connexion] Vecteur actuel extrait (test de vie réussi).`);
 
             // Étape 4 : Calcul de l'engagement de référence
             this.log(`[Connexion] Calcul de l'engagement Poseidon de référence...`);

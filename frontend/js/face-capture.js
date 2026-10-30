@@ -81,16 +81,29 @@ class FaceCapture {
     }
 
     /**
-     * Détecte le visage et extrait le descripteur facial normalisé de 128 dimensions
+     * Détecte le visage, exécute (optionnellement) le test de vie anti-photo,
+     * puis extrait le descripteur facial normalisé de 128 dimensions
+     * @param {Object} [params]
+     * @param {string[]} [params.defis] - Défis imposés par le serveur (ex: ["blink","smile"])
+     * @param {Function} [params.onStatus] - Callback de progression (message affiché à l'utilisateur)
+     * @param {Function} [params.onErreur] - Callback appelé en cas d'échec d'un défi
      * @returns {Promise<Float32Array>} Vecteur descripteur facial 128D
      */
-    async captureDescriptor() {
+    async captureDescriptor(params = {}) {
+        const { defis = null, onStatus = null, onErreur = null } = params;
+
         if (!this.videoElement) {
             throw new Error("La caméra n'est pas initialisée. Veuillez d'abord démarrer la capture.");
         }
 
         if (!this.modelsLoaded) {
             throw new Error("Les modèles IA ne sont pas encore prêts.");
+        }
+
+        // --- NOUVEAU : test de vie avant l'extraction du descripteur ---
+        // Une photo ne peut pas exécuter les défis → aucun descripteur n'est extrait.
+        if (Array.isArray(defis) && defis.length > 0) {
+            await window.LivenessModule.executerDefis(this.videoElement, defis, { onStatus, onErreur });
         }
 
         console.log("[FaceCapture] Détection faciale et extraction du descripteur en cours...");
