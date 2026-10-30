@@ -21,12 +21,15 @@ class LivenessModule {
     this.FPS = 10; // frames analysées par seconde
     this.DUREE_REFERENCE_MS = 1500; // calibration initiale (visage de face)
     this.DUREE_MAX_DEFI_MS = 10000; // délai accordé pour exécuter un défi
-    this.SEUIL_EAR_CLIGNEMENT = 0.23; // ouverture des yeux en dessous = clignement
+    this.SEUIL_EAR_CLIGNEMENT = 0.25; // ouverture des yeux en dessous = clignement
+    this.FACTEUR_EAR_CLIGNEMENT = 0.8; // ... ou 80 % de l'ouverture mesurée (le plus bas des deux)
     this.SEUIL_ROTATION = 0.1; // écart du rapport nez/yeux vs position de face
     this.GAIN_SOURIRE = 1.08; // la bouche doit s'élargir de 8 %
-    // Si le défi "tournez la tête à gauche" se valide quand vous tournez à droite,
-    // inversez ce signe (dépend du mirroring de la webcam) :
-    this.SENS_ROTATION = +1;
+
+    // Les frames brutes de la webcam ne sont pas miroitées (seul l'affichage CSS
+    // l'est) : tourner à SA gauche fait AUGMENTER le rapport dans l'image.
+    // Si un défi se valide dans le mauvais sens, inversez ce signe.
+    this.SENS_ROTATION = -1;
 
     // --- Continuité temporelle (anti-échange de photos pendant un défi) ---
     // Un visage réel bouge continûment : entre 2 frames espacées de 100 ms, le
@@ -37,18 +40,18 @@ class LivenessModule {
     // --- Catalogue des défis (les clés correspondent à nonce.py) ---
     this._DEFIS = {
       blink: {
-        texte: "clignez des yeux",
-        tester: (v, r, s) => s._testerBlink(v, r, s),
+        texte: "clignez lentement des yeux",
+        tester: (v, r, s) => s._testerBlink(v, r),
       },
       turn_left: {
         texte: "tournez la tête vers votre gauche",
-        tester: (v, r, s) => s._testerTurn(v, r, s, -1),
+        tester: (v, r, s) => s._testerTurn(v, r, -1),
       },
       turn_right: {
         texte: "tournez la tête vers votre droite",
-        tester: (v, r, s) => s._testerTurn(v, r, s, +1),
+        tester: (v, r, s) => s._testerTurn(v, r, +1),
       },
-      smile: { texte: "souriez", tester: (v, r, s) => s._testerSmile(v, r, s) },
+      smile: { texte: "souriez", tester: (v, r, s) => s._testerSmile(v, r) },
     };
   }
 
@@ -86,6 +89,23 @@ class LivenessModule {
     return yeux > 0 ? this._d(bouche[0], bouche[6]) / yeux : 0;
   }
 
+  // Mesures plausibles pour un vrai visage. Quand la tête est tournée trop
+  // loin, le détecteur peut décrocher et produire des landmarks aberrants
+  // (EAR > 1, rot > 1.5...) : ces frames doivent être ignorées.
+  _plausible(lm) {
+    const ear = this._earMoyen(lm);
+    const rot = this._ratioRotation(lm);
+    const bouche = this._ratioBouche(lm);
+    return (
+      ear >= 0.05 &&
+      ear <= 0.55 &&
+      rot >= -0.1 &&
+      rot <= 0.9 &&
+      bouche >= 0.15 &&
+      bouche <= 1.5
+    );
+  }
+
   /* ============== Outils ============== */
 
   _attendre(ms) {
@@ -112,7 +132,8 @@ class LivenessModule {
       const t0 = Date.now();
       const res = await this._detecter(video);
 
-      if (res) {
+      // Les frames aberrantes sont ignorées comme s'il n'y avait pas de visage
+      if (res && this._plausible(res.landmarks)) {
         if (!this._continuiteOk(res, precedente)) {
           discontinuites++;
           if (discontinuites >= 2) {
@@ -177,7 +198,7 @@ class LivenessModule {
     for (let i = 0; i < n; i++) {
       const res = await this._detecter(video);
       const lm = res ? res.landmarks : null;
-      if (lm) {
+      if (lm && this._plausible(lm)) {
         somme.ear += this._earMoyen(lm);
         somme.rot += this._ratioRotation(lm);
         somme.bouche += this._ratioBouche(lm);
@@ -200,8 +221,11 @@ class LivenessModule {
   /* ============== Défis individuels ============== */
 
   async _testerBlink(video, ref) {
-    // Seuil adaptatif : min entre seuil absolu et 70 % de l'ouverture mesurée
-    const seuil = Math.min(this.SEUIL_EAR_CLIGNEMENT, ref.ear * 0.7);
+    // Seuil adaptatif : min entre seuil absolu et un % de l'ouverture mesurée
+    const seuil = Math.min(
+      this.SEUIL_EAR_CLIGNEMENT,
+      ref.ear * this.FACTEUR_EAR_CLIGNEMENT,
+    );
     return this._framesPendant(
       video,
       this.DUREE_MAX_DEFI_MS,
@@ -210,11 +234,12 @@ class LivenessModule {
   }
 
   async _testerTurn(video, ref, sens) {
-    // Cible : le rapport doit franchir ref.rot ± SEUIL_ROTATION dans la bonne direction
-    const cible = ref.rot + this.SENS_ROTATION * sens * this.SEUIL_ROTATION;
+    // delta donne ET la cible ET le sens de comparaison
+    const delta = this.SENS_ROTATION * sens;
+    const cible = ref.rot + delta * this.SEUIL_ROTATION;
     return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm) => {
       const r = this._ratioRotation(lm);
-      return sens > 0 ? r >= cible : r <= cible;
+      return delta > 0 ? r >= cible : r <= cible;
     });
   }
 
