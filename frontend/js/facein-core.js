@@ -233,135 +233,188 @@ class FaceInCore {
         this.setProcessing(true, 'auth');
 
         try {
-            // Étape 1 : Récupération du vecteur d'inscription
-            this.updateStatus("Récupération du vecteur d'inscription...", false, 'auth');
-            this.log(`[Connexion] Recherche du vecteur local pour '${userId}'...`);
-            const originalVector = await window.StorageManager.getVector(userId);
+          // Étape 1 : Récupération du vecteur d'inscription
+          this.updateStatus(
+            "Récupération du vecteur d'inscription...",
+            false,
+            "auth",
+          );
+          this.log(
+            `[Connexion] Recherche du vecteur local pour '${userId}'...`,
+          );
+          const originalVector = await window.StorageManager.getVector(userId);
 
-            if (!originalVector) {
-                const msg = "Aucun vecteur trouvé. Inscrivez-vous d'abord sur cet appareil.";
-                this.log(`[Connexion] ${msg}`, "warn");
-                this.updateStatus(`❌ ${msg}`, true, 'auth');
-                return;
+          if (!originalVector) {
+            const msg =
+              "Aucun vecteur trouvé. Inscrivez-vous d'abord sur cet appareil.";
+            this.log(`[Connexion] ${msg}`, "warn");
+            this.updateStatus(`❌ ${msg}`, true, "auth");
+            return;
+          }
+          this.log(`[Connexion] Vecteur original récupéré depuis IndexedDB.`);
+
+          // Étape 2 : Demande du nonce anti-rejeu + défis de vie auprès du serveur
+          // (AVANT la capture : les défis doivent être imposés par le serveur,
+          //  aléatoires et frais — le nonce vit 60 s, le test de vie ~18 s max)
+          this.updateStatus("Demande du nonce anti-rejeu...", false, "auth");
+          const nonceUrl = `${window.CONFIG.API_BASE_URL}/nonce/${encodeURIComponent(userId)}`;
+          this.log(`[Connexion] GET ${nonceUrl}`);
+
+          const nonceResp = await fetch(nonceUrl);
+          if (!nonceResp.ok) {
+            let errText = `Erreur HTTP ${nonceResp.status}`;
+            try {
+              const errJson = await nonceResp.json();
+              errText = errJson.message || errJson.detail || errText;
+            } catch (e) {}
+            throw new Error(`Impossible d'obtenir un nonce: ${errText}`);
+          }
+
+          const nonceData = await nonceResp.json();
+          const nonce = nonceData.nonce || nonceData;
+          const defis = Array.isArray(nonceData.defis) ? nonceData.defis : [];
+          this.log(`[Connexion] Nonce anti-rejeu obtenu: ${nonce}`);
+          this.log(
+            `[Connexion] Défis de vie imposés par le serveur : ${defis.join(", ") || "aucun"}`,
+          );
+
+          // Étape 3 : Capture du visage actuel AVEC test de vie anti-photo
+          this.updateStatus(
+            "Capture du visage (suivez les instructions)...",
+            false,
+            "auth",
+          );
+          this.log(`[Connexion] Capture du visage actuel avec test de vie...`);
+          const currentVector = await window.FaceCapture.captureDescriptor({
+            defis: defis,
+            onStatus: (msg) => this.updateStatus(msg, false, "auth"),
+            onErreur: (msg) => this.log(`[Liveness] ${msg}`, "warn"),
+          });
+          this.log(`[Connexion] Vecteur actuel extrait (test de vie réussi).`);
+
+          // Étape 4 : Calcul de l'engagement de référence
+          this.log(
+            `[Connexion] Calcul de l'engagement Poseidon de référence...`,
+          );
+          const scaledOriginal = window.ZkpEngine.scaleVector(originalVector);
+          const commitment =
+            await window.ZkpEngine.computeCommitment(scaledOriginal);
+
+          // Étape 5 : Génération de la preuve ZKP
+          this.updateStatus(
+            "Génération de la preuve ZKP (peut prendre quelques secondes)...",
+            false,
+            "auth",
+          );
+          this.log(
+            `[Connexion] Génération de la preuve Groth16 avec seuil ${window.CONFIG.DISTANCE_THRESHOLD}...`,
+          );
+          const { proof, publicSignals } = await window.ZkpEngine.generateProof(
+            originalVector,
+            currentVector,
+            commitment,
+            window.CONFIG.DISTANCE_THRESHOLD,
+          );
+
+          // Calcul et affichage clair de la distance pour l'utilisateur
+          let floatDistSq = 0;
+          for (let i = 0; i < 128; i++) {
+            const diff = originalVector[i] - currentVector[i];
+            floatDistSq += diff * diff;
+          }
+          const floatDist = Math.sqrt(floatDistSq);
+          this.log(
+            `[Biométrie] Distance euclidienne calculée : ${floatDist.toFixed(4)} (Seuil max : 0.6000)`,
+          );
+          this.log(`[Connexion] Preuve générée avec succès.`);
+
+          // Étape 6 : Envoi de la preuve au serveur
+          this.updateStatus("Envoi de la preuve au serveur...", false, "auth");
+          const authUrl = `${window.CONFIG.API_BASE_URL}/authenticate`;
+          this.log(
+            `[Connexion] POST ${authUrl} avec preuve, signaux publics et nonce.`,
+          );
+
+          const authResp = await fetch(authUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              user_id: userId,
+              proof: proof,
+              public_signals: publicSignals,
+              nonce: nonce,
+            }),
+          });
+
+          if (!authResp.ok) {
+            let errDetails = `Code HTTP ${authResp.status}`;
+            try {
+              const errJson = await authResp.json();
+              errDetails =
+                errJson.raison_refus ||
+                errJson.message ||
+                errJson.detail ||
+                errDetails;
+            } catch (e) {
+              const text = await authResp.text();
+              if (text) errDetails = text;
             }
-            this.log(`[Connexion] Vecteur original récupéré depuis IndexedDB.`);
+            throw new Error(errDetails);
+          }
 
-            // Étape 2 : Demande du nonce anti-rejeu + défis de vie auprès du serveur
-            // (AVANT la capture : les défis doivent être imposés par le serveur,
-            //  aléatoires et frais — le nonce vit 60 s, le test de vie ~18 s max)
-            this.updateStatus("Demande du nonce anti-rejeu...", false, 'auth');
-            const nonceUrl = `${window.CONFIG.API_BASE_URL}/nonce/${encodeURIComponent(userId)}`;
-            this.log(`[Connexion] GET ${nonceUrl}`);
+          const authResult = await authResp.json();
+          this.log(
+            `[Connexion] Réponse d'authentification: ${JSON.stringify(authResult)}`,
+          );
 
-            const nonceResp = await fetch(nonceUrl);
-            if (!nonceResp.ok) {
-                let errText = `Erreur HTTP ${nonceResp.status}`;
-                try {
-                    const errJson = await nonceResp.json();
-                    errText = errJson.message || errJson.detail || errText;
-                } catch (e) {}
-                throw new Error(`Impossible d'obtenir un nonce: ${errText}`);
-            }
-
-            const nonceData = await nonceResp.json();
-            const nonce = nonceData.nonce || nonceData;
-            const defis = Array.isArray(nonceData.defis) ? nonceData.defis : [];
-            this.log(`[Connexion] Nonce anti-rejeu obtenu: ${nonce}`);
-            this.log(`[Connexion] Défis de vie imposés par le serveur : ${defis.join(', ') || 'aucun'}`);
-
-            // Étape 3 : Capture du visage actuel AVEC test de vie anti-photo
-            this.updateStatus("Capture du visage (suivez les instructions)...", false, 'auth');
-            this.log(`[Connexion] Capture du visage actuel avec test de vie...`);
-            const currentVector = await window.FaceCapture.captureDescriptor({
-                defis: defis,
-                onStatus: (msg) => this.updateStatus(msg, false, 'auth'),
-                onErreur: (msg) => this.log(`[Liveness] ${msg}`, "warn"),
-            });
-            this.log(`[Connexion] Vecteur actuel extrait (test de vie réussi).`);
-
-            // Étape 4 : Calcul de l'engagement de référence
-            this.log(`[Connexion] Calcul de l'engagement Poseidon de référence...`);
-            const scaledOriginal = window.ZkpEngine.scaleVector(originalVector);
-            const commitment = await window.ZkpEngine.computeCommitment(scaledOriginal);
-
-            // Étape 5 : Génération de la preuve ZKP
-            this.updateStatus("Génération de la preuve ZKP (peut prendre quelques secondes)...", false, 'auth');
-            this.log(`[Connexion] Génération de la preuve Groth16 avec seuil ${window.CONFIG.DISTANCE_THRESHOLD}...`);
-            const { proof, publicSignals } = await window.ZkpEngine.generateProof(
-                originalVector,
-                currentVector,
-                commitment,
-                window.CONFIG.DISTANCE_THRESHOLD
+          if (
+            authResult.accepte === true ||
+            authResult.success === true ||
+            authResult.token
+          ) {
+            const token = authResult.token || "SESSION_OK";
+            this.updateStatus(
+              `✅ Authentifié ! Token: ${token}`,
+              false,
+              "auth",
             );
-            
-            // Calcul et affichage clair de la distance pour l'utilisateur
-            let floatDistSq = 0;
-            for (let i = 0; i < 128; i++) {
-                const diff = originalVector[i] - currentVector[i];
-                floatDistSq += diff * diff;
-            }
-            const floatDist = Math.sqrt(floatDistSq);
-            this.log(`[Biométrie] Distance euclidienne calculée : ${floatDist.toFixed(4)} (Seuil max : 0.6000)`);
-            this.log(`[Connexion] Preuve générée avec succès.`);
+            this.log(
+              `[Connexion] Authentification confirmée avec token ${token}`,
+              "success",
+            );
 
-            // Étape 6 : Envoi de la preuve au serveur
-            this.updateStatus("Envoi de la preuve au serveur...", false, 'auth');
-            const authUrl = `${window.CONFIG.API_BASE_URL}/authenticate`;
-            this.log(`[Connexion] POST ${authUrl} avec preuve, signaux publics et nonce.`);
-
-            const authResp = await fetch(authUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
+            // Transmission automatique du jeton au site partenaire (popup opener) si présent
+            if (window.opener && !window.opener.closed) {
+              try {
+                this.log(
+                  "[Connexion] Transmission du jeton à la fenêtre parente...",
+                );
+                window.opener.postMessage(
+                  {
+                    type: "FACEIN_AUTH_SUCCESS",
+                    token: token,
                     user_id: userId,
-                    proof: proof,
-                    public_signals: publicSignals,
-                    nonce: nonce
-                })
-            });
-
-            if (!authResp.ok) {
-                let errDetails = `Code HTTP ${authResp.status}`;
-                try {
-                    const errJson = await authResp.json();
-                    errDetails = errJson.raison_refus || errJson.message || errJson.detail || errDetails;
-                } catch (e) {
-                    const text = await authResp.text();
-                    if (text) errDetails = text;
-                }
-                throw new Error(errDetails);
+                  },
+                  "*",
+                );
+                setTimeout(() => window.close(), 1500);
+              } catch (openerErr) {
+                console.warn(
+                  "[Connexion] Impossible de notifier window.opener:",
+                  openerErr,
+                );
+              }
             }
-
-            const authResult = await authResp.json();
-            this.log(`[Connexion] Réponse d'authentification: ${JSON.stringify(authResult)}`);
-
-            if (authResult.accepte === true || authResult.success === true || authResult.token) {
-                const token = authResult.token || "SESSION_OK";
-                this.updateStatus(`✅ Authentifié ! Token: ${token}`, false, 'auth');
-                this.log(`[Connexion] Authentification confirmée avec token ${token}`, "success");
-
-                // Transmission automatique du jeton au site partenaire (popup opener) si présent
-                if (window.opener && !window.opener.closed) {
-                    try {
-                        this.log("[Connexion] Transmission du jeton à la fenêtre parente...");
-                        window.opener.postMessage({
-                            type: 'FACEIN_AUTH_SUCCESS',
-                            token: token,
-                            user_id: userId
-                        }, '*');
-                        setTimeout(() => window.close(), 1500);
-                    } catch (openerErr) {
-                        console.warn("[Connexion] Impossible de notifier window.opener:", openerErr);
-                    }
-                }
-            } else {
-                const raison = authResult.raison_refus || authResult.message || "Authentification refusée par les nœuds.";
-                this.updateStatus(`❌ Échec: ${raison}`, true, 'auth');
-                this.log(`[Connexion] Rejet: ${raison}`, "error");
-            }
-
+          } else {
+            const raison =
+              authResult.raison_refus ||
+              authResult.message ||
+              "Authentification refusée par les nœuds.";
+            this.updateStatus(`❌ Échec: ${raison}`, true, "auth");
+            this.log(`[Connexion] Rejet: ${raison}`, "error");
+          }
         } catch (error) {
             console.error("[Connexion] Erreur:", error);
             let displayMsg = error.message;
