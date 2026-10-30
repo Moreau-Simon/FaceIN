@@ -416,7 +416,7 @@ def test_exception_inattendue_sur_un_pair_n_interrompt_pas_les_autres(
     erreurs = [
         record
         for record in caplog.records
-        if "Erreur inattendue pendant l'appel heartbeat vers node-b:50052"
+        if "Erreur inattendue pendant l'appel battement de"
         in record.getMessage()
     ]
     assert len(erreurs) == 3

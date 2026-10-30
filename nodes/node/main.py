@@ -14,17 +14,14 @@ import secrets
 import signal
 from threading import Event
 
-try:
-    import grpc
-except ImportError:
-    grpc = None
+import grpc
 
 from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
 from consensus.validation import decider, VerificateurZKP
 from network.peer_client import demander_vote, envoyer_heartbeat
-from network.peers import PeerRegistry
+from network.peers import PeerRegistry, formater_adresse_pair
 from network.server import ErreurDemarrageServeur, start_grpc_server
 from verification.nonces import NonceStore
 
@@ -72,11 +69,11 @@ def _traiter_echec(
     raison: str,
     niveau: int,
 ) -> None:
-    """Enregistre un échec heartbeat et journalise sa transition d'état."""
+    """Enregistre un échec de battement de cœur et journalise la transition."""
     ancien, nouveau = registre.record_failure(host, port, raison)
     _journaliser_changement_etat(
         node_id,
-        f"{host}:{port}",
+        formater_adresse_pair(host, port),
         ancien,
         nouveau,
         raison,
@@ -106,7 +103,7 @@ def main():
     """
     Démarre le noeud et vérifie périodiquement la disponibilité de ses pairs.
 
-    Les heartbeats sont envoyés en parallèle aux pairs. Une erreur de
+    Les battements de cœur sont envoyés en parallèle aux pairs. Une erreur de
     communication avec un pair n'empêche pas le traitement des autres.
     """
 
@@ -174,7 +171,7 @@ def main():
         raise SystemExit(1) from exc
         
     logger.info(
-        "[%s] Noeud prêt ; %d pair(s) configuré(s)",
+        "[%s] Nœud prêt ; %d pair(s) configuré(s)",
         config["node_id"],
         len(config["peers"]),
     )
@@ -208,7 +205,9 @@ def main():
 
                 for future in as_completed(futures):
                     peer = futures[future]
-                    address = f"{peer['host']}:{peer['port']}"
+                    address = formater_adresse_pair(
+                        peer["host"], peer["port"]
+                    )
                     try:
                         try:
                             resultat = future.result()
@@ -238,7 +237,7 @@ def main():
                         except Exception:
                             logger.exception(
                                 "[%s] Erreur inattendue pendant l'appel "
-                                "heartbeat vers %s ; le traitement des "
+                                "battement de cœur vers %s ; le traitement des "
                                 "autres pairs continue",
                                 config["node_id"],
                                 address,
@@ -289,7 +288,7 @@ def main():
                     except Exception:
                         logger.exception(
                             "[%s] Erreur inattendue pendant le traitement "
-                            "du heartbeat vers %s ; le traitement des "
+                            "du battement de cœur vers %s ; le traitement des "
                             "autres pairs continue",
                             config["node_id"],
                             address,

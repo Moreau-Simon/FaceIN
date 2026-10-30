@@ -4,16 +4,12 @@ le consensus de vote et la vérification des preuves cryptographiques ZKP.
 """
 
 import logging
+import os
 import uuid
 from concurrent import futures
-
-try:
-    import grpc
-except ImportError:
-    grpc = None
-
-import os
 from pathlib import Path
+
+import grpc
 
 import sync_pb2
 import sync_pb2_grpc
@@ -25,6 +21,11 @@ import verification_pb2_grpc
 from consensus.validation import empaqueter_preuve
 
 logger = logging.getLogger(__name__)
+
+
+class ErreurDemarrageServeur(RuntimeError):
+    """Échec du démarrage du serveur gRPC du nœud."""
+
 
 def _tls_enabled() -> bool:
     return os.getenv("TLS_ENABLED", "false").strip().lower() in {
@@ -58,10 +59,6 @@ def charger_credentials_serveur():
         require_client_auth=True,
     )
 
-class ErreurDemarrageServeur(RuntimeError):
-    """Échec du démarrage du serveur gRPC du nœud."""
-
-
 class SyncService(sync_pb2_grpc.SyncServiceServicer):
     """Implémente le service de synchronisation exposé par le noeud."""
 
@@ -71,7 +68,7 @@ class SyncService(sync_pb2_grpc.SyncServiceServicer):
     def Heartbeat(self, request, context):
         """Confirme que le noeud répond aux appels gRPC."""
         logger.info(
-            "[%s] Heartbeat reçu de %s",
+            "[%s] Battement de cœur reçu de %s",
             self.node_id,
             request.noeud_id,
         )

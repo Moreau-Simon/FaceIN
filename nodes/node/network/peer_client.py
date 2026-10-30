@@ -13,6 +13,7 @@ import consensus_pb2
 import consensus_pb2_grpc
 import sync_pb2
 import sync_pb2_grpc
+from network.peers import formater_adresse_pair
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def envoyer_heartbeat(node_id, host, port, timeout_sec) -> tuple[str, bool]:
     Retourne un tuple ``(node_id_pair, en_sante)`` avec l'identité annoncée
     par le pair et son indicateur de santé.
     """
-    address = f"{host}:{port}"
+    address = formater_adresse_pair(host, port)
 
     logger.debug(
         "[%s] Tentative d'envoi du heartbeat vers %s",
@@ -95,7 +96,7 @@ def demander_vote(
     timeout_sec: float,
 ) -> tuple[str, bool]:
     """Demande le vote d'un pair et refuse une réponse à une autre demande."""
-    address = f"{host}:{port}"
+    address = formater_adresse_pair(host, port)
     with creer_canal_securise(address) as channel:
         stub = consensus_pb2_grpc.ConsensusServiceStub(channel)
         reponse = stub.DemanderVote(demande, timeout=timeout_sec)

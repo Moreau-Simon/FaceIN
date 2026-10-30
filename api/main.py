@@ -46,9 +46,9 @@ BANNER = r"""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Cycle de vie de l'application FastAPI : affiche la bannière au démarrage."""
-    print(BANNER)
-    logger.info("Passerelle API FaceIn démarrée avec succès.")
+    """Journalise le démarrage et l'arrêt de l'API."""
+    logger.info("%s", BANNER)
+    logger.info("Passerelle API FaceIn démarrée.")
     yield
     logger.info("Arrêt de la passerelle API FaceIn.")
 

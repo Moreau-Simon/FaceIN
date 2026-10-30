@@ -84,11 +84,18 @@ Après `docker compose up --build`, lancez depuis la racine :
 docker compose exec node-a python client_verification.py --utilisateur-id demo --preuve preuve-de-test
 ```
 
+Le client utilise le mTLS configuré dans le conteneur (`TLS_CA_CERT`,
+`TLS_CERT` et `TLS_KEY`) et se connecte à `node-a:50051`, nom correspondant
+au SAN du certificat. Ne remplacez pas cette adresse par `localhost` : le
+certificat du nœud ne couvre pas ce nom.
+
 `--preuve preuve-de-test` est uniquement une valeur fictive : le mock actuel
 l'accepte parce qu'elle n'est pas vide. N'utilisez pas ce client, le mock ou
 le token actuel pour protéger un service réel. Pour joindre un autre nœud ou
 utiliser d'autres valeurs, fournissez `--address`, `--utilisateur-id`,
 `--preuve` et éventuellement `--service-cible`.
+L'option `--insecure` ne doit être utilisée que pour un test où le serveur a
+explicitement désactivé TLS.
 
 ## Config partagée
 
@@ -97,6 +104,8 @@ et leurs pairs (`NODE_ID`, `NODE_PORT`, `PEERS`). Le fichier
 `shared/config/noeuds.yaml` contient les paramètres partagés de consensus,
 de synchronisation Merkle et de heartbeat, chargés et validés au démarrage
 par `node/config.py`.
+Les pairs IPv4 et DNS utilisent `hostname:port`; les adresses IPv6 doivent
+être entre crochets, par exemple `[2001:db8::2]:50052`.
 
 Les `NODE_ID` sont considérés comme stables pendant l'exécution. Le registre
 associe l'identité annoncée à l'adresse du pair et refuse qu'elle change à

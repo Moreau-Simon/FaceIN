@@ -97,6 +97,41 @@ def test_demander_vote_refuse_une_reponse_pour_un_autre_id(monkeypatch):
         peer_client.demander_vote("node-b", 50052, demande, 1.5)
 
 
+def test_demander_vote_formate_correctement_une_adresse_ipv6(monkeypatch):
+    monkeypatch.setenv("TLS_ENABLED", "false")
+    demande = SimpleNamespace(id_demande="requete-ipv6")
+    reponse = SimpleNamespace(
+        id_demande="requete-ipv6",
+        noeud_id="node-b",
+        vote=consensus_pb2.VOTE_POUR,
+    )
+    canal = CanalFactice()
+    adresses = []
+
+    class StubFactice:
+        def __init__(self, channel):
+            assert channel is canal
+
+        def DemanderVote(self, demande_recue, timeout):
+            return reponse
+
+    monkeypatch.setattr(
+        peer_client.grpc,
+        "insecure_channel",
+        lambda address: adresses.append(address) or canal,
+    )
+    monkeypatch.setattr(
+        peer_client.consensus_pb2_grpc,
+        "ConsensusServiceStub",
+        StubFactice,
+    )
+
+    assert peer_client.demander_vote(
+        "2001:db8::2", 50052, demande, 1.5
+    ) == ("node-b", True)
+    assert adresses == ["[2001:db8::2]:50052"]
+
+
 def test_demander_vote_utilise_tls_mutuel_quand_active(monkeypatch, tmp_path):
     ca = tmp_path / "ca.crt"
     cert = tmp_path / "node.crt"

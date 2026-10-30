@@ -10,6 +10,14 @@ PeerStatus = Literal["unknown", "online", "suspect", "offline"]
 ECHECS_AVANT_HORS_LIGNE_DEFAUT = 3
 
 
+def formater_adresse_pair(host: str, port: int) -> str:
+    """Formate une adresse réseau, avec crochets pour les hôtes IPv6."""
+    host = host.strip()
+    if ":" in host and not (host.startswith("[") and host.endswith("]")):
+        host = f"[{host}]"
+    return f"{host}:{port}"
+
+
 def cle_pair(host: str, port: int) -> str:
     """Identifiant stable d'un pair dans le registre : « hote:port ».
 
@@ -24,7 +32,7 @@ def cle_pair(host: str, port: int) -> str:
         raise TypeError("port doit être un entier")
     if not 1 <= port <= 65535:
         raise ValueError("port doit être compris entre 1 et 65535")
-    return f"{host.strip().lower()}:{port}"
+    return formater_adresse_pair(host.strip().lower(), port)
 
 @dataclass
 class PeerInfo:
