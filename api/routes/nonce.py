@@ -26,9 +26,11 @@ router = APIRouter()
 
 DUREE_NONCE_SECONDES = 60
 
-# --- Nouveau : défis de vie supportés par le frontend (clés reconnues par liveness.js) ---
-DEFIS_DISPONIBLES = ["blink", "turn_left", "turn_right", "smile"]
+# --- Défis de vie supportés par le frontend (clés reconnues par liveness.js) ---
+DEFIS_DISPONIBLES = ["blink", "turn_left", "turn_right", "smile", "approche"]
 NOMBRE_DEFIS = 2
+# Le défi "approche" (parallaxe de profondeur) est TOUJOURS imposé : c'est le
+# seul qu'un support plat (photo/écran) ne peut pas simuler en le manipulant.
 
 
 class NonceResponse(BaseModel):
@@ -71,8 +73,9 @@ def get_nonce(user_id: str) -> NonceResponse:
     # 2. Enregistrement en SQLite pour double vérification par la passerelle API
     save_nonce(nonce=nonce, user_id=user_id_clean, expires_at=float(expires_at))
 
-    # 3. --- Nouveau : tirage aléatoire des défis de vie ---
-    defis = random.sample(DEFIS_DISPONIBLES, k=min(NOMBRE_DEFIS, len(DEFIS_DISPONIBLES)))
+    # 3. --- Tirage des défis de vie : "approche" toujours imposé + 1 défi aléatoire ---
+    autres = [d for d in DEFIS_DISPONIBLES if d != "approche"]
+    defis = ["approche"] + random.sample(autres, k=min(NOMBRE_DEFIS - 1, len(autres)))
     logger.info("Défis de vie imposés à '%s' : %s", user_id_clean, ", ".join(defis))
 
     return NonceResponse(

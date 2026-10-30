@@ -21,37 +21,48 @@ class LivenessModule {
     this.FPS = 10; // frames analysées par seconde
     this.DUREE_REFERENCE_MS = 1500; // calibration initiale (visage de face)
     this.DUREE_MAX_DEFI_MS = 10000; // délai accordé pour exécuter un défi
-    this.SEUIL_EAR_CLIGNEMENT = 0.25; // ouverture des yeux en dessous = clignement
-    this.FACTEUR_EAR_CLIGNEMENT = 0.8; // ... ou 80 % de l'ouverture mesurée (le plus bas des deux)
+    this.SEUIL_EAR_CLIGNEMENT = 0.26; // ouverture des yeux en dessous = clignement
     this.SEUIL_ROTATION = 0.1; // écart du rapport nez/yeux vs position de face
     this.GAIN_SOURIRE = 1.08; // la bouche doit s'élargir de 8 %
-
-    // Les frames brutes de la webcam ne sont pas miroitées (seul l'affichage CSS
-    // l'est) : tourner à SA gauche fait AUGMENTER le rapport dans l'image.
-    // Si un défi se valide dans le mauvais sens, inversez ce signe.
+    this.SEUIL_PROFONDEUR = 1.08; // rapport nez/yeux doit croître de 8 % (relief 3D)
+    this.GAIN_CROISSANCE = 1.15; // la boîte englobante doit grandir de 15 % (rapprochement)
+    // Les frames brutes de la webcam ne sont PAS miroirées : quand l'utilisateur
+    // tourne la tête vers SA gauche, le rapport nez/yeux AUGMENTE dans l'image.
+    // (-1 correspond à cette réalité, validée par les mesures réelles ;
+    //  remettez +1 si votre flux vidéo est miroité.)
     this.SENS_ROTATION = -1;
 
     // --- Continuité temporelle (anti-échange de photos pendant un défi) ---
     // Un visage réel bouge continûment : entre 2 frames espacées de 100 ms, le
     // centre du visage ne peut pas "téléporter" ni changer brusquement de taille.
-    this.MAX_SAUT_CENTRE = 0.25; // déplacement max du centre entre 2 frames (× largeur du visage)
-    this.MAX_SAUT_ECHELLE = 0.2; // variation max de la largeur du visage entre 2 frames
+    this.MAX_SAUT_CENTRE = 0.35; // déplacement max du centre entre 2 frames (× largeur du visage)
+    this.MAX_SAUT_ECHELLE = 0.3; // variation max de la largeur du visage entre 2 frames
+    // (Bornes volontairement souples : un vrai utilisateur qui bouge en
+    //  clignant ou en se rapprochant ne doit PAS être bloqué. Un échange de
+    //  support produit typiquement des sauts bien plus grands.)
 
     // --- Catalogue des défis (les clés correspondent à nonce.py) ---
     this._DEFIS = {
       blink: {
         texte: "clignez lentement des yeux",
-        tester: (v, r, s) => s._testerBlink(v, r),
+        tester: (v, r, s) => s._testerBlink(v, r, s),
       },
       turn_left: {
         texte: "tournez la tête vers votre gauche",
-        tester: (v, r, s) => s._testerTurn(v, r, -1),
+        tester: (v, r, s) => s._testerTurn(v, r, s, -1),
       },
       turn_right: {
         texte: "tournez la tête vers votre droite",
-        tester: (v, r, s) => s._testerTurn(v, r, +1),
+        tester: (v, r, s) => s._testerTurn(v, r, s, +1),
       },
-      smile: { texte: "souriez", tester: (v, r, s) => s._testerSmile(v, r) },
+      smile: {
+        texte: "souriez franchement",
+        tester: (v, r, s) => s._testerSmile(v, r, s),
+      },
+      approche: {
+        texte: "approchez votre tête de la caméra (sans la pencher)",
+        tester: (v, r, s) => s._testerApproche(v, r, s),
+      },
     };
   }
 
@@ -89,21 +100,22 @@ class LivenessModule {
     return yeux > 0 ? this._d(bouche[0], bouche[6]) / yeux : 0;
   }
 
-  // Mesures plausibles pour un vrai visage. Quand la tête est tournée trop
-  // loin, le détecteur peut décrocher et produire des landmarks aberrants
-  // (EAR > 1, rot > 1.5...) : ces frames doivent être ignorées.
-  _plausible(lm) {
-    const ear = this._earMoyen(lm);
-    const rot = this._ratioRotation(lm);
-    const bouche = this._ratioBouche(lm);
-    return (
-      ear >= 0.05 &&
-      ear <= 0.55 &&
-      rot >= -0.1 &&
-      rot <= 0.9 &&
-      bouche >= 0.15 &&
-      bouche <= 1.5
+  // MESURE CLÉ ANTI-PHOTO : distance du bout du nez à la ligne des coins
+  // d'yeux, divisée par l'écartement des yeux. Un visage réel a du relief :
+  // en se rapprochant de la caméra, le nez (plus proche) grandit PLUS VITE
+  // que les yeux → ce rapport AUGMENTE. Une photo/écran est plat : tout se
+  // met à l'échelle uniformément → le rapport reste CONSTANT.
+  _ratioProfondeur(lm) {
+    const nez = lm.getNose()[6];
+    const g = lm.getLeftEye()[0];
+    const d = lm.getRightEye()[3];
+    const ecart = this._d(g, d);
+    if (ecart <= 0) return 0;
+    // distance du point `nez` à la droite (g, d) — ligne quasi horizontale
+    const num = Math.abs(
+      (d.y - g.y) * nez.x - (d.x - g.x) * nez.y + d.x * g.y - d.y * g.x,
     );
+    return num / ecart / ecart;
   }
 
   /* ============== Outils ============== */
@@ -132,8 +144,7 @@ class LivenessModule {
       const t0 = Date.now();
       const res = await this._detecter(video);
 
-      // Les frames aberrantes sont ignorées comme s'il n'y avait pas de visage
-      if (res && this._plausible(res.landmarks)) {
+      if (res) {
         if (!this._continuiteOk(res, precedente)) {
           discontinuites++;
           if (discontinuites >= 2) {
@@ -147,7 +158,7 @@ class LivenessModule {
         }
         precedente = res;
 
-        const valide = validateur(res.landmarks);
+        const valide = validateur(res.landmarks, res);
         if (this.DEBUG) {
           const lm = res.landmarks;
           console.log(
@@ -157,6 +168,8 @@ class LivenessModule {
               this._ratioRotation(lm).toFixed(3) +
               " bouche=" +
               this._ratioBouche(lm).toFixed(3) +
+              " prof=" +
+              this._ratioProfondeur(lm).toFixed(3) +
               (valide ? " → VALIDÉ ✔" : ""),
           );
         }
@@ -193,7 +206,7 @@ class LivenessModule {
   async _mesurerReference(video) {
     const pas = 1000 / this.FPS;
     const n = Math.max(4, Math.round(this.DUREE_REFERENCE_MS / pas));
-    let somme = { ear: 0, rot: 0, bouche: 0 },
+    let somme = { ear: 0, rot: 0, bouche: 0, prof: 0, largeur: 0 },
       vus = 0;
     for (let i = 0; i < n; i++) {
       const res = await this._detecter(video);
@@ -202,6 +215,8 @@ class LivenessModule {
         somme.ear += this._earMoyen(lm);
         somme.rot += this._ratioRotation(lm);
         somme.bouche += this._ratioBouche(lm);
+        somme.prof += this._ratioProfondeur(lm);
+        somme.largeur += res.detection.box.width;
         vus++;
       }
       await this._attendre(pas);
@@ -215,26 +230,35 @@ class LivenessModule {
       ear: somme.ear / vus,
       rot: somme.rot / vus,
       bouche: somme.bouche / vus,
+      prof: somme.prof / vus,
+      largeur: somme.largeur / vus,
     };
   }
 
   /* ============== Défis individuels ============== */
 
   async _testerBlink(video, ref) {
-    // Seuil adaptatif : min entre seuil absolu et un % de l'ouverture mesurée
-    const seuil = Math.min(
-      this.SEUIL_EAR_CLIGNEMENT,
-      ref.ear * this.FACTEUR_EAR_CLIGNEMENT,
-    );
+    // Seuil adaptatif : on accepte une chute relative de l'ouverture des yeux.
+    // Un clignement volontaire, un peu maintenu, garantit plusieurs frames.
+    const seuil = Math.min(this.SEUIL_EAR_CLIGNEMENT, ref.ear * 0.85);
+    // DURCISSEMENT anti-support-plat : faire pivoter une photo fait aussi
+    // varier l'EAR mesuré — mais alors la rotation et la bouche bougent en
+    // même temps. Un vrai clignement ne fait tomber QUE l'EAR : on exige
+    // donc que le reste du visage soit resté stable.
     return this._framesPendant(
       video,
       this.DUREE_MAX_DEFI_MS,
-      (lm) => this._earMoyen(lm) < seuil,
+      (lm) =>
+        this._earMoyen(lm) < seuil &&
+        Math.abs(this._ratioRotation(lm) - ref.rot) <= 0.08 &&
+        Math.abs(this._ratioBouche(lm) - ref.bouche) <= ref.bouche * 0.1,
     );
   }
 
   async _testerTurn(video, ref, sens) {
-    // delta donne ET la cible ET le sens de comparaison
+    // Cible : le rapport doit franchir ref.rot ± SEUIL_ROTATION dans la
+    // direction attendue. delta donne ET la cible ET le sens de comparaison
+    // (comparer avec `sens` seul inverserait le défi).
     const delta = this.SENS_ROTATION * sens;
     const cible = ref.rot + delta * this.SEUIL_ROTATION;
     return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm) => {
@@ -245,11 +269,33 @@ class LivenessModule {
 
   async _testerSmile(video, ref) {
     const cible = ref.bouche * this.GAIN_SOURIRE;
+    // DURCISSEMENT anti-support-plat : un VRAI sourire rétrécit légèrement
+    // les yeux (les joues montent — visible dans nos mesures réelles :
+    // EAR 0.316 → 0.276 en souriant). Déplacer une photo change le rapport
+    // de bouche mais laisse l'EAR constant → rejet.
     return this._framesPendant(
       video,
       this.DUREE_MAX_DEFI_MS,
-      (lm) => this._ratioBouche(lm) >= cible,
+      (lm) =>
+        this._ratioBouche(lm) >= cible && this._earMoyen(lm) <= ref.ear * 0.95,
     );
+  }
+
+  async _testerApproche(video, ref) {
+    // LE défi qu'un support plat ne peut pas simuler, même en le manipulant :
+    // 1. la boîte englobante doit grandir d'au moins 15 % (on se rapproche) ;
+    // 2. le rapport nez/ligne-des-yeux doit croître de 8 % : le nez, plus
+    //    proche que les yeux, grandit plus vite — c'est le RELIEF du visage.
+    //    Une photo se rapprochant de la caméra grandit uniformément → le
+    //    rapport reste constant → jamais validée. La faire pivoter fait
+    //    chuter la largeur → condition 1 impossible.
+    return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm, res) => {
+      const croissance = res.detection.box.width / ref.largeur;
+      return (
+        croissance >= this.GAIN_CROISSANCE &&
+        this._ratioProfondeur(lm) >= ref.prof * this.SEUIL_PROFONDEUR
+      );
+    });
   }
 
   /* ============== Orchestrateur ============== */
@@ -297,6 +343,13 @@ class LivenessModule {
       }
     }
 
+    // Petite pause : l'utilisateur vient d'exécuter les défis (tête tournée,
+    // visage rapproché...) et doit se replacer de face avant l'extraction du
+    // descripteur — sinon la capture échoue ("Aucun visage détecté").
+    onStatus(
+      "Test de vie réussi ✔ — replacez-vous de face devant la caméra...",
+    );
+    await this._attendre(2000);
     onStatus("Test de vie réussi ✔");
     return true;
   }
