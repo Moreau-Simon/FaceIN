@@ -17,13 +17,32 @@
 class LivenessModule {
   constructor() {
     // --- Paramètres du test de vie (calibrables) ---
-    this.DEBUG = true; // log des mesures dans la console (mettre false après calibrage)
+    this.DEBUG = true; // log console + mesures affichées à l'écran (false après calibrage)
     this.FPS = 10; // frames analysées par seconde
-    this.DUREE_REFERENCE_MS = 1500; // calibration initiale (visage de face)
+    this.DUREE_REFERENCE_MS = 1500; // durée visée pour la calibration (visage de face)
+    this.DUREE_CALIBRATION_MAX_MS = 4000; // délai max pour obtenir assez de frames valides
+    this.FRAMES_REFERENCE_MIN = 8; // nombre minimal de frames valides pour calibrer
     this.DUREE_MAX_DEFI_MS = 10000; // délai accordé pour exécuter un défi
+    // Confiance minimale du détecteur. 0.65 perdait le visage dès que la tête
+    // tournait ou que les yeux se fermaient ; 0.5 reste fiable pour un visage réel.
+    this.CONFIANCE_MIN = 0.5;
+
+    // Clignement
     this.SEUIL_EAR_CLIGNEMENT = 0.26; // ouverture des yeux en dessous = clignement
-    this.SEUIL_ROTATION = 0.1; // écart du rapport nez/yeux vs position de face
+    this.RATIO_EAR_FERME = 0.85; // œil "fermé" si EAR < 85 % de la référence
+    this.RATIO_EAR_OUVERT = 0.92; // œil "rouvert" si EAR remonte à 92 % de la référence
+    // Fermer les yeux déplace légèrement les coins d'yeux détectés, ce qui fait
+    // bouger les ratios rotation/bouche : les tolérances doivent être réalistes.
+    this.STABILITE_ROT_BLINK = 0.15;
+    this.STABILITE_BOUCHE_BLINK = 0.25; // 25 % de la valeur de référence
+
+    // Rotation
+    this.SEUIL_ROTATION = 0.06; // écart du rapport nez/yeux vs position de face
+    this.FRAMES_ROTATION = 2; // frames consécutives au-delà du seuil (anti-bruit)
+
+    // Sourire
     this.GAIN_SOURIRE = 1.08; // la bouche doit s'élargir de 8 %
+
     // Les frames brutes de la webcam ne sont PAS miroirées : quand l'utilisateur
     // tourne la tête vers SA gauche, le rapport nez/yeux AUGMENTE dans l'image.
     // (-1 correspond à cette réalité, validée par les mesures réelles ;
@@ -31,31 +50,36 @@ class LivenessModule {
     this.SENS_ROTATION = -1;
 
     // --- Continuité temporelle (anti-échange de photos pendant un défi) ---
-    // Un visage réel bouge continûment : entre 2 frames espacées de 100 ms, le
-    // centre du visage ne peut pas "téléporter" ni changer brusquement de taille.
-    this.MAX_SAUT_CENTRE = 0.35; // déplacement max du centre entre 2 frames (× largeur du visage)
-    this.MAX_SAUT_ECHELLE = 0.3; // variation max de la largeur du visage entre 2 frames
-    // (Bornes volontairement souples : un vrai utilisateur qui bouge en
-    //  clignant ou en se rapprochant ne doit PAS être bloqué. Un échange de
-    //  support produit typiquement des sauts bien plus grands.)
+    // Un visage réel bouge continûment. Les sauts sont mesurés relativement à la
+    // HAUTEUR du visage (la largeur de la boîte rétrécit naturellement quand on
+    // tourne la tête) et la tolérance augmente si l'écart entre 2 frames valides
+    // est long (le détecteur peut perdre le visage quelques frames).
+    this.MAX_SAUT_CENTRE = 0.35; // déplacement max du centre entre 2 frames (× hauteur du visage)
+    this.MAX_SAUT_ECHELLE = 0.3; // variation max de la hauteur du visage entre 2 frames
+    this.DISCONTINUITES_MAX = 3; // nombre de sauts consécutifs tolérés avant d'échouer
+    this.PAS_REFERENCE_MS = 150; // écart "normal" entre 2 frames valides
+
+    // Callback d'affichage (renseigné par executerDefis)
+    this._onStatus = null;
+    this._texteCourant = "";
 
     // --- Catalogue des défis (les clés correspondent à nonce.py) ---
     this._DEFIS = {
       blink: {
         texte: "clignez lentement des yeux",
-        tester: (v, r, s) => s._testerBlink(v, r, s),
+        tester: (v, r, s) => s._testerBlink(v, r),
       },
       turn_left: {
         texte: "tournez la tête vers votre gauche",
-        tester: (v, r, s) => s._testerTurn(v, r, s, -1),
+        tester: (v, r, s) => s._testerTurn(v, r, -1),
       },
       turn_right: {
         texte: "tournez la tête vers votre droite",
-        tester: (v, r, s) => s._testerTurn(v, r, s, +1),
+        tester: (v, r, s) => s._testerTurn(v, r, +1),
       },
       smile: {
         texte: "souriez franchement",
-        tester: (v, r, s) => s._testerSmile(v, r, s),
+        tester: (v, r, s) => s._testerSmile(v, r),
       },
     };
   }
@@ -100,10 +124,21 @@ class LivenessModule {
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  // Affichage des mesures en direct à l'écran (uniquement en mode DEBUG).
+  _afficherMesures(lm) {
+    if (!this.DEBUG || !this._onStatus) return;
+    const suffixe = lm
+      ? ` [EAR=${this._earMoyen(lm).toFixed(2)} rot=${this._ratioRotation(lm).toFixed(2)} bouche=${this._ratioBouche(lm).toFixed(2)}]`
+      : " [visage non détecté]";
+    this._onStatus(`Test de vie : ${this._texteCourant}${suffixe}`);
+  }
+
   // Détection avec landmarks (le résultat contient .landmarks ET .detection.box,
   // la boîte étant nécessaire au contrôle de continuité).
   async _detecter(video) {
-    const options = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.65 });
+    const options = new faceapi.SsdMobilenetv1Options({
+      minConfidence: this.CONFIANCE_MIN,
+    });
     return faceapi.detectSingleFace(video, options).withFaceLandmarks();
   }
 
@@ -114,6 +149,7 @@ class LivenessModule {
     const pas = 1000 / this.FPS;
     const fin = Date.now() + dureeMs;
     let precedente = null;
+    let tPrecedente = 0;
     let discontinuites = 0;
 
     while (Date.now() < fin) {
@@ -125,9 +161,10 @@ class LivenessModule {
       // produire des mesures impossibles (ex. EAR = 45). Ces frames sont
       // ignorées comme s'il n'y avait pas de visage.
       if (res && this._plausible(res.landmarks)) {
-        if (!this._continuiteOk(res, precedente)) {
+        const dt = precedente ? t0 - tPrecedente : this.PAS_REFERENCE_MS;
+        if (!this._continuiteOk(res, precedente, dt)) {
           discontinuites++;
-          if (discontinuites >= 2) {
+          if (discontinuites >= this.DISCONTINUITES_MAX) {
             throw new Error(
               "Mouvement du visage discontinu (échange de support devant la caméra ?). " +
                 "Test de vie échoué.",
@@ -137,8 +174,10 @@ class LivenessModule {
           discontinuites = 0;
         }
         precedente = res;
+        tPrecedente = t0;
 
         const valide = validateur(res.landmarks, res);
+        this._afficherMesures(res.landmarks);
         if (this.DEBUG) {
           const lm = res.landmarks;
           console.log(
@@ -152,20 +191,28 @@ class LivenessModule {
           );
         }
         if (valide) return true;
+      } else {
+        this._afficherMesures(null);
+        if (this.DEBUG) {
+          console.log(
+            res
+              ? "[Liveness] frame ignorée (mesures non plausibles)"
+              : "[Liveness] aucun visage détecté sur cette frame",
+          );
+        }
       }
       // Attente adaptative : la détection prend déjà 100-300 ms,
       // on n'ajoute que le temps manquant pour viser un vrai this.FPS.
-      // (Sans ça, l'échantillonnage réel tombe à ~3 fps → le clignement
-      //  dure ~150 ms et est raté entre deux frames.)
       const ecoule = Date.now() - t0;
       if (ecoule < pas) await this._attendre(pas - ecoule);
     }
     return false;
   }
 
-  // Le centre du visage doit rester dans un rayon de MAX_SAUT_CENTRE largeurs de
-  // visage entre 2 frames consécutives, et sa taille ne doit pas varier brutalement.
-  _continuiteOk(res, precedente) {
+  // Le centre du visage doit rester dans un rayon de MAX_SAUT_CENTRE hauteurs de
+  // visage entre 2 frames, et sa taille ne doit pas varier brutalement.
+  // La tolérance est proportionnelle à l'écart de temps réel entre les 2 frames.
+  _continuiteOk(res, precedente, dtMs) {
     if (!precedente) return true;
     const b = res.detection.box;
     const p = precedente.detection.box;
@@ -173,10 +220,12 @@ class LivenessModule {
       Math.hypot(
         b.x + b.width / 2 - (p.x + p.width / 2),
         b.y + b.height / 2 - (p.y + p.height / 2),
-      ) / p.width;
-    const sautEchelle = Math.abs(b.width - p.width) / p.width;
+      ) / p.height;
+    const sautEchelle = Math.abs(b.height - p.height) / p.height;
+    const tolerance = Math.max(1, dtMs / this.PAS_REFERENCE_MS);
     return (
-      sautCentre <= this.MAX_SAUT_CENTRE && sautEchelle <= this.MAX_SAUT_ECHELLE
+      sautCentre <= this.MAX_SAUT_CENTRE * tolerance &&
+      sautEchelle <= this.MAX_SAUT_ECHELLE * tolerance
     );
   }
 
@@ -196,13 +245,21 @@ class LivenessModule {
     );
   }
 
-  // Calibration : moyenne des mesures sur ~15 frames, visage de face.
+  // Calibration : moyenne des mesures sur des frames valides, visage de face.
+  // On continue d'échantillonner (jusqu'à DUREE_CALIBRATION_MAX_MS) tant qu'on
+  // n'a pas assez de frames : l'utilisateur a besoin d'un instant pour se placer.
   async _mesurerReference(video) {
     const pas = 1000 / this.FPS;
-    const n = Math.max(4, Math.round(this.DUREE_REFERENCE_MS / pas));
-    let somme = { ear: 0, rot: 0, bouche: 0 },
-      vus = 0;
-    for (let i = 0; i < n; i++) {
+    const nCible = Math.max(
+      this.FRAMES_REFERENCE_MIN,
+      Math.round(this.DUREE_REFERENCE_MS / pas),
+    );
+    const fin = Date.now() + this.DUREE_CALIBRATION_MAX_MS;
+    let somme = { ear: 0, rot: 0, bouche: 0 };
+    let vus = 0;
+
+    while (vus < nCible && Date.now() < fin) {
+      const t0 = Date.now();
       const res = await this._detecter(video);
       const lm = res ? res.landmarks : null;
       if (lm && this._plausible(lm)) {
@@ -211,11 +268,13 @@ class LivenessModule {
         somme.bouche += this._ratioBouche(lm);
         vus++;
       }
-      await this._attendre(pas);
+      const ecoule = Date.now() - t0;
+      if (ecoule < pas) await this._attendre(pas - ecoule);
     }
-    if (vus < Math.ceil(n / 2)) {
+    if (vus < this.FRAMES_REFERENCE_MIN) {
       throw new Error(
-        "Aucun visage détecté pendant la calibration du test de vie.",
+        "Aucun visage détecté pendant la calibration du test de vie. " +
+          "Placez-vous de face, avec un bon éclairage.",
       );
     }
     return {
@@ -228,21 +287,31 @@ class LivenessModule {
   /* ============== Défis individuels ============== */
 
   async _testerBlink(video, ref) {
-    // Seuil adaptatif : on accepte une chute relative de l'ouverture des yeux.
-    // Un clignement volontaire, un peu maintenu, garantit plusieurs frames.
-    const seuil = Math.min(this.SEUIL_EAR_CLIGNEMENT, ref.ear * 0.85);
-    // DURCISSEMENT anti-support-plat : faire pivoter une photo fait aussi
-    // varier l'EAR mesuré — mais alors la rotation et la bouche bougent en
-    // même temps. Un vrai clignement ne fait tomber QUE l'EAR : on exige
-    // donc que le reste du visage soit resté stable.
-    return this._framesPendant(
-      video,
-      this.DUREE_MAX_DEFI_MS,
-      (lm) =>
-        this._earMoyen(lm) < seuil &&
-        Math.abs(this._ratioRotation(lm) - ref.rot) <= 0.08 &&
-        Math.abs(this._ratioBouche(lm) - ref.bouche) <= ref.bouche * 0.1,
+    // Seuil adaptatif : chute relative de l'ouverture des yeux par rapport à la référence.
+    const seuilFerme = Math.min(
+      this.SEUIL_EAR_CLIGNEMENT,
+      ref.ear * this.RATIO_EAR_FERME,
     );
+    const seuilOuvert = ref.ear * this.RATIO_EAR_OUVERT;
+    let ferme = false;
+
+    // Un vrai clignement = yeux fermés PUIS rouverts, sans que la tête ne bouge
+    // franchement (anti-photo pivotée). Exiger la réouverture évite aussi qu'un
+    // simple bruit de landmarks valide le défi.
+    return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm) => {
+      const ear = this._earMoyen(lm);
+      const stable =
+        Math.abs(this._ratioRotation(lm) - ref.rot) <=
+          this.STABILITE_ROT_BLINK &&
+        Math.abs(this._ratioBouche(lm) - ref.bouche) <=
+          ref.bouche * this.STABILITE_BOUCHE_BLINK;
+      if (!stable) {
+        ferme = false; // la tête a bougé : on repart de zéro
+        return false;
+      }
+      if (ear < seuilFerme) ferme = true; // yeux fermés détectés
+      return ferme && ear >= seuilOuvert; // puis rouverts => clignement validé
+    });
   }
 
   async _testerTurn(video, ref, sens) {
@@ -251,9 +320,12 @@ class LivenessModule {
     // (comparer avec `sens` seul inverserait le défi).
     const delta = this.SENS_ROTATION * sens;
     const cible = ref.rot + delta * this.SEUIL_ROTATION;
+    let consecutives = 0;
     return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm) => {
       const r = this._ratioRotation(lm);
-      return delta > 0 ? r >= cible : r <= cible;
+      const atteint = delta > 0 ? r >= cible : r <= cible;
+      consecutives = atteint ? consecutives + 1 : 0;
+      return consecutives >= this.FRAMES_ROTATION;
     });
   }
 
@@ -283,6 +355,7 @@ class LivenessModule {
   async executerDefis(video, defis, callbacks = {}) {
     const onStatus = callbacks.onStatus || (() => {});
     const onErreur = callbacks.onErreur || (() => {});
+    this._onStatus = onStatus;
 
     if (typeof faceapi === "undefined") {
       throw new Error("face-api.js n'est pas chargé : test de vie impossible.");
@@ -303,6 +376,7 @@ class LivenessModule {
     for (const cle of defis) {
       const defi = this._DEFIS[cle];
       if (!defi) continue; // clé inconnue : ignorée (compatibilité future)
+      this._texteCourant = defi.texte;
       onStatus(`Test de vie : ${defi.texte}`);
       const reussi = await defi.tester(video, ref, this);
       if (!reussi) {
@@ -324,6 +398,7 @@ class LivenessModule {
     );
     await this._attendre(2000);
     onStatus("Test de vie réussi ✔");
+    this._onStatus = null;
     return true;
   }
 }
