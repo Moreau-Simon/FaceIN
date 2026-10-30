@@ -24,8 +24,6 @@ class LivenessModule {
     this.SEUIL_EAR_CLIGNEMENT = 0.26; // ouverture des yeux en dessous = clignement
     this.SEUIL_ROTATION = 0.1; // écart du rapport nez/yeux vs position de face
     this.GAIN_SOURIRE = 1.08; // la bouche doit s'élargir de 8 %
-    this.SEUIL_PROFONDEUR = 1.08; // rapport nez/yeux doit croître de 8 % (relief 3D)
-    this.GAIN_CROISSANCE = 1.15; // la boîte englobante doit grandir de 15 % (rapprochement)
     // Les frames brutes de la webcam ne sont PAS miroirées : quand l'utilisateur
     // tourne la tête vers SA gauche, le rapport nez/yeux AUGMENTE dans l'image.
     // (-1 correspond à cette réalité, validée par les mesures réelles ;
@@ -58,10 +56,6 @@ class LivenessModule {
       smile: {
         texte: "souriez franchement",
         tester: (v, r, s) => s._testerSmile(v, r, s),
-      },
-      approche: {
-        texte: "approchez votre tête de la caméra (sans la pencher)",
-        tester: (v, r, s) => s._testerApproche(v, r, s),
       },
     };
   }
@@ -98,24 +92,6 @@ class LivenessModule {
     const bouche = lm.getMouth();
     const yeux = this._d(lm.getLeftEye()[0], lm.getRightEye()[3]);
     return yeux > 0 ? this._d(bouche[0], bouche[6]) / yeux : 0;
-  }
-
-  // MESURE CLÉ ANTI-PHOTO : distance du bout du nez à la ligne des coins
-  // d'yeux, divisée par l'écartement des yeux. Un visage réel a du relief :
-  // en se rapprochant de la caméra, le nez (plus proche) grandit PLUS VITE
-  // que les yeux → ce rapport AUGMENTE. Une photo/écran est plat : tout se
-  // met à l'échelle uniformément → le rapport reste CONSTANT.
-  _ratioProfondeur(lm) {
-    const nez = lm.getNose()[6];
-    const g = lm.getLeftEye()[0];
-    const d = lm.getRightEye()[3];
-    const ecart = this._d(g, d);
-    if (ecart <= 0) return 0;
-    // distance du point `nez` à la droite (g, d) — ligne quasi horizontale
-    const num = Math.abs(
-      (d.y - g.y) * nez.x - (d.x - g.x) * nez.y + d.x * g.y - d.y * g.x,
-    );
-    return num / ecart / ecart;
   }
 
   /* ============== Outils ============== */
@@ -172,8 +148,6 @@ class LivenessModule {
               this._ratioRotation(lm).toFixed(3) +
               " bouche=" +
               this._ratioBouche(lm).toFixed(3) +
-              " prof=" +
-              this._ratioProfondeur(lm).toFixed(3) +
               (valide ? " → VALIDÉ ✔" : ""),
           );
         }
@@ -226,7 +200,7 @@ class LivenessModule {
   async _mesurerReference(video) {
     const pas = 1000 / this.FPS;
     const n = Math.max(4, Math.round(this.DUREE_REFERENCE_MS / pas));
-    let somme = { ear: 0, rot: 0, bouche: 0, prof: 0, largeur: 0 },
+    let somme = { ear: 0, rot: 0, bouche: 0 },
       vus = 0;
     for (let i = 0; i < n; i++) {
       const res = await this._detecter(video);
@@ -235,8 +209,6 @@ class LivenessModule {
         somme.ear += this._earMoyen(lm);
         somme.rot += this._ratioRotation(lm);
         somme.bouche += this._ratioBouche(lm);
-        somme.prof += this._ratioProfondeur(lm);
-        somme.largeur += res.detection.box.width;
         vus++;
       }
       await this._attendre(pas);
@@ -250,8 +222,6 @@ class LivenessModule {
       ear: somme.ear / vus,
       rot: somme.rot / vus,
       bouche: somme.bouche / vus,
-      prof: somme.prof / vus,
-      largeur: somme.largeur / vus,
     };
   }
 
@@ -301,23 +271,6 @@ class LivenessModule {
     );
   }
 
-  async _testerApproche(video, ref) {
-    // LE défi qu'un support plat ne peut pas simuler, même en le manipulant :
-    // 1. la boîte englobante doit grandir d'au moins 15 % (on se rapproche) ;
-    // 2. le rapport nez/ligne-des-yeux doit croître de 8 % : le nez, plus
-    //    proche que les yeux, grandit plus vite — c'est le RELIEF du visage.
-    //    Une photo se rapprochant de la caméra grandit uniformément → le
-    //    rapport reste constant → jamais validée. La faire pivoter fait
-    //    chuter la largeur → condition 1 impossible.
-    return this._framesPendant(video, this.DUREE_MAX_DEFI_MS, (lm, res) => {
-      const croissance = res.detection.box.width / ref.largeur;
-      return (
-        croissance >= this.GAIN_CROISSANCE &&
-        this._ratioProfondeur(lm) >= ref.prof * this.SEUIL_PROFONDEUR
-      );
-    });
-  }
-
   /* ============== Orchestrateur ============== */
 
   /**
@@ -342,8 +295,7 @@ class LivenessModule {
     if (this.DEBUG) {
       console.log(
         `[Liveness] Référence calibrée : EAR=${ref.ear.toFixed(3)} ` +
-          `rot=${ref.rot.toFixed(3)} bouche=${ref.bouche.toFixed(3)} ` +
-          `prof=${ref.prof.toFixed(3)} largeur=${ref.largeur.toFixed(0)}px`,
+          `rot=${ref.rot.toFixed(3)} bouche=${ref.bouche.toFixed(3)}`,
       );
     }
 
