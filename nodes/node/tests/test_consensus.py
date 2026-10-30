@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import grpc
 import pytest
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 import consensus_pb2
 import consensus_pb2_grpc
@@ -254,6 +255,11 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
             verification=service
         ),
     )
+    monkeypatch.setattr(
+        health_pb2_grpc,
+        "add_HealthServicer_to_server",
+        lambda service, serveur: services_enregistres.update(health=service),
+    )
 
     resultat = server_module.start_grpc_server(
         "node-a",
@@ -274,3 +280,6 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
         services_enregistres["verification"]._fabriquer_token
         is fabriquer_token
     )
+    assert services_enregistres["health"].Check(
+        health_pb2.HealthCheckRequest(), None
+    ).status == health_pb2.HealthCheckResponse.SERVING

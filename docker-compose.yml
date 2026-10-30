@@ -28,7 +28,6 @@ services:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-a.crt:/app/certs/node-a.crt:ro
       - ./certs/node-a.key:/app/certs/node-a.key:ro
-
     ports:
       - "50051:50051"
     networks:
@@ -92,9 +91,12 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - node-a
-      - node-b
-      - node-c
+      node-a:
+        condition: service_healthy
+      node-b:
+        condition: service_healthy
+      node-c:
+        condition: service_healthy
     environment:
       - TLS_ENABLED=true
       - TLS_CA_CERT=/app/certs/ca.crt

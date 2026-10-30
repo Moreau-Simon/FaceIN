@@ -19,6 +19,9 @@ plus lent, dans la limite du délai de chaque appel.
 `docker-compose.yml` accorde 10 secondes à chaque nœud pour s'arrêter après
 `docker stop`. Ce délai est supérieur au timeout heartbeat configuré (3 s),
 avec une marge pour terminer les appels en cours et fermer le serveur.
+Chaque nœud expose aussi le protocole standard `grpc.health.v1`. Le contrôle
+Docker appelle ce service en mTLS ; l'API ne démarre qu'après que les trois
+nœuds sont déclarés sains par Docker Compose (`service_healthy`).
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via

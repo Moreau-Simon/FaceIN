@@ -16,6 +16,9 @@ COPY node/ .
 COPY shared/ /app/shared
 COPY shared/verification_key.json /app/shared/verification_key.json
 
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=6 \
+    CMD ["python", "-m", "healthcheck"]
+
 # Compilation gRPC Protobuf
 RUN python -m grpc_tools.protoc \
     -I /app/shared/proto \

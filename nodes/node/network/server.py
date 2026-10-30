@@ -10,6 +10,7 @@ from concurrent import futures
 from pathlib import Path
 
 import grpc
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 
 import sync_pb2
 import sync_pb2_grpc
@@ -67,7 +68,7 @@ class SyncService(sync_pb2_grpc.SyncServiceServicer):
 
     def Heartbeat(self, request, context):
         """Confirme que le noeud répond aux appels gRPC."""
-        logger.info(
+        logger.debug(
             "[%s] Battement de cœur reçu de %s",
             self.node_id,
             request.noeud_id,
@@ -219,6 +220,10 @@ def start_grpc_server(
         ),
         server,
     )
+
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     if _tls_enabled():
         credentials = charger_credentials_serveur()
