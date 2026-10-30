@@ -144,7 +144,11 @@ class LivenessModule {
       const t0 = Date.now();
       const res = await this._detecter(video);
 
-      if (res) {
+      // Filtre des détections aberrantes : quand la tête est très tournée, le
+      // détecteur peut se fixer sur le bord du visage ou l'arrière-plan et
+      // produire des mesures impossibles (ex. EAR = 45). Ces frames sont
+      // ignorées comme s'il n'y avait pas de visage.
+      if (res && this._plausible(res.landmarks)) {
         if (!this._continuiteOk(res, precedente)) {
           discontinuites++;
           if (discontinuites >= 2) {
@@ -199,6 +203,22 @@ class LivenessModule {
     const sautEchelle = Math.abs(b.width - p.width) / p.width;
     return (
       sautCentre <= this.MAX_SAUT_CENTRE && sautEchelle <= this.MAX_SAUT_ECHELLE
+    );
+  }
+
+  // Mesures plausibles pour un vrai visage : rejette les détections aberrantes
+  // (l'EAR réel reste < 0.55 ; le bout du nez reste ~entre les coins d'yeux).
+  _plausible(lm) {
+    const ear = this._earMoyen(lm);
+    const rot = this._ratioRotation(lm);
+    const bouche = this._ratioBouche(lm);
+    return (
+      ear >= 0.05 &&
+      ear <= 0.55 &&
+      rot >= -0.1 &&
+      rot <= 0.9 &&
+      bouche >= 0.15 &&
+      bouche <= 1.5
     );
   }
 
@@ -322,7 +342,8 @@ class LivenessModule {
     if (this.DEBUG) {
       console.log(
         `[Liveness] Référence calibrée : EAR=${ref.ear.toFixed(3)} ` +
-          `rot=${ref.rot.toFixed(3)} bouche=${ref.bouche.toFixed(3)}`,
+          `rot=${ref.rot.toFixed(3)} bouche=${ref.bouche.toFixed(3)} ` +
+          `prof=${ref.prof.toFixed(3)} largeur=${ref.largeur.toFixed(0)}px`,
       );
     }
 
