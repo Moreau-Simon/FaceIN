@@ -74,11 +74,10 @@
       this.el = {
         frame: q('#g-frame'), face: q('#g-face'), eyes: q('#g-eyes'), eyeL: q('#g-eye-l'), eyeR: q('#g-eye-r'),
         nose: q('#g-nose'), mouthW: q('#g-mouth-wrap'), mouth: q('#g-mouth'),
-        arrowR: q('#g-arrow-r'), arrowRPath: q('#g-arrow-r-path'),
-        arrowL: q('#g-arrow-l'), arrowLPath: q('#g-arrow-l-path'),
+        arrow: q('#g-arrow'), arrowPath: q('#g-arrow-path'),
         check: q('#g-check'), circle: q('#g-circle'), tick: q('#g-check-path')
       };
-      gsap.set([this.el.face, this.el.frame, this.el.arrowR, this.el.arrowL], { svgOrigin: '48 48' });
+      gsap.set([this.el.face, this.el.frame, this.el.arrow], { svgOrigin: '48 48' });
       gsap.set(this.el.nose, { svgOrigin: '48 36' });
     }
 
@@ -118,8 +117,8 @@
       gsap.set(e.mouth, { attr: { d: MOUTH.neutral } });
       gsap.set(e.eyeL, { attr: { d: EYES.neutral[0] } });
       gsap.set(e.eyeR, { attr: { d: EYES.neutral[1] } });
-      gsap.set([e.arrowR, e.arrowL], { opacity: 0 });
-      gsap.set([e.arrowRPath, e.arrowLPath], { strokeDasharray: 100, strokeDashoffset: 100 });
+      gsap.set(e.arrow, { opacity: 0, scaleX: 1 });
+      gsap.set(e.arrowPath, { strokeDasharray: 100, strokeDashoffset: 100 });
       gsap.set(e.check, { opacity: 0 });
       gsap.set([e.circle, e.tick], { strokeDasharray: 100, strokeDashoffset: 100 });
     }
@@ -175,7 +174,7 @@
 
       gsap.fromTo(o.pill, { autoAlpha: 0, y: 10, scale: 0.85 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.45, ease: 'back.out(1.7)' });
       gsap.to(o.glyph, {
-        x: dx, y: dy, scale: sl.width / 128, duration: 0.7, ease: 'power3.inOut',
+        x: dx, y: dy, scale: sl.width / 96, duration: 0.7, ease: 'power3.inOut',
         onComplete: () => { this.loopTl = this.demo(id, -1); }
       });
       gsap.to(o.video, { filter: BLUR_OFF, duration: 0.6, ease: 'power2.out' });
@@ -197,22 +196,17 @@
         return tl;
       }
 
-      const isRight = id === 'HEAD_RIGHT';
-      const dir = isRight ? 1 : -1;
-      const arrow = isRight ? e.arrowR : e.arrowL;
-      const arrowPath = isRight ? e.arrowRPath : e.arrowLPath;
-
-      // Rotation de la tête 2.5D et animation de la flèche correspondante (gauche ou droite)
+      const dir = id === 'HEAD_RIGHT' ? 1 : -1;
+      gsap.set(e.arrow, { scaleX: dir });
       tl.to(e.face, { scaleX: 0.88, duration: d, ease }, 0)
         .to(e.eyes, { x: 5 * dir, duration: d, ease }, 0)
         .to(e.nose, { x: 9 * dir, rotation: 14 * dir, duration: d, ease }, 0)
         .to(e.mouthW, { x: 4 * dir, duration: d, ease }, 0)
-        .to(arrow, { opacity: 1, duration: 0.18 }, 0)
-        .fromTo(arrowPath, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: d + 0.08, ease: 'power1.out' }, 0)
-        .to(arrow, { x: 4 * dir, duration: d * 0.5, yoyo: true, repeat: 1, ease: 'sine.inOut' }, 0.1)
+        .to(e.arrow, { opacity: 1, duration: 0.2 }, 0)
+        .fromTo(e.arrowPath, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: d + 0.1, ease: 'power1.out' }, 0)
         .to(e.face, { scaleX: 1, duration: d, ease }, d + 0.3)
         .to([e.eyes, e.nose, e.mouthW], { x: 0, rotation: 0, duration: d, ease }, d + 0.3)
-        .to(arrow, { opacity: 0, x: 0, duration: 0.2 }, d + 0.3);
+        .to(e.arrow, { opacity: 0, duration: 0.2 }, d + 0.3);
       return tl;
     }
 

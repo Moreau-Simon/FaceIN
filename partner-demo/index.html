@@ -73,10 +73,7 @@
             <span class="btn-facein-shimmer" aria-hidden="true"></span>
             <span class="btn-facein-content">
               <span class="facein-icon-wrapper">
-                <svg width="22" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-                  <path d="M 50 5 L 85 25 L 85 45 L 60 30 L 25 50 L 25 80 L 5 70 L 5 30 Z" fill="#FFFFFF"/>
-                  <path d="M 50 95 L 15 75 L 15 55 L 40 70 L 75 50 L 75 20 L 95 30 L 95 70 Z" fill="#38BDF8"/>
-                </svg>
+                <svg width="22" height="22" viewBox="56 30 281 317" fill="none" aria-hidden="true"><path d="M190 37L256 73L125 150V224L192 264L128 301L63 264V109Z" fill="#FFFFFF"/><path d="M266 80L330 116V267L203 340L139 303L270 228V152L205 115Z" fill="#3369F6"/></svg>
               </span>
               <span class="btn-facein-texts">
                 <span class="btn-facein-main">Se connecter avec <span class="highlight-in">FaceIN</span></span>
@@ -185,10 +182,7 @@
     <div class="fi-modal">
       <header class="fi-header">
         <div class="fi-brand">
-          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-            <path d="M 50 5 L 85 25 L 85 45 L 60 30 L 25 50 L 25 80 L 5 70 L 5 30 Z" fill="#FFFFFF"/>
-            <path d="M 50 95 L 15 75 L 15 55 L 40 70 L 75 50 L 75 20 L 95 30 L 95 70 Z" fill="#38BDF8"/>
-          </svg>
+          <svg width="28" height="28" viewBox="56 30 281 317" fill="none" aria-hidden="true"><path d="M190 37L256 73L125 150V224L192 264L128 301L63 264V109Z" fill="#FFFFFF"/><path d="M266 80L330 116V267L203 340L139 303L270 228V152L205 115Z" fill="#3369F6"/></svg>
           <div>
             <h3 class="fi-title" id="fi-title">Authentification FaceIN</h3>
             <span class="fi-status" id="modal-status-text">Initialisation…</span>
@@ -220,9 +214,8 @@
           <span class="fi-pill-label" id="fi-pill-label"></span>
         </div>
 
-        <!-- Glyphe Face ID 2.5D : cadre, visage (yeux, nez, bouche), flèches gauche/droite + checkmark -->
-        <!-- viewBox élargie avec marge (-16 -16 128 128) pour éviter tout rognage lors des animations -->
-        <svg class="fi-glyph" id="fi-glyph" viewBox="-16 -16 128 128" fill="none" stroke="currentColor"
+        <!-- Glyphe Face ID 2.5D : calques séparés (cadre, yeux, nez, bouche) + flèche + checkmark -->
+        <svg class="fi-glyph" id="fi-glyph" viewBox="0 0 96 96" fill="none" stroke="currentColor"
              stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <g id="g-frame"><path d="M8 28V22a14 14 0 0 1 14-14h6M68 8h6a14 14 0 0 1 14 14v6M88 68v6a14 14 0 0 1-14 14h-6M28 88h-6A14 14 0 0 1 8 74v-6"/></g>
           <g id="g-face">
@@ -230,14 +223,7 @@
             <g id="g-nose"><path d="M48 36v18h-5"/></g>
             <g id="g-mouth-wrap"><path id="g-mouth" d="M36 66q12 3 24 0"/></g>
           </g>
-          <!-- Flèche directionnelle à droite du visage (avec marge de sécurité) -->
-          <g id="g-arrow-r" class="glyph-arrow">
-            <path id="g-arrow-r-path" pathLength="100" d="M86 38l7 10-7 10M72 48h21"/>
-          </g>
-          <!-- Flèche directionnelle à gauche du visage (avec marge de sécurité) -->
-          <g id="g-arrow-l" class="glyph-arrow">
-            <path id="g-arrow-l-path" pathLength="100" d="M10 38l-7 10 7 10M24 48H3"/>
-          </g>
+          <g id="g-arrow"><path id="g-arrow-path" pathLength="100" d="M92 30q12 18 0 36M84 62l8 4 3-9"/></g>
           <g id="g-check">
             <circle id="g-circle" pathLength="100" cx="48" cy="48" r="34"/>
             <path id="g-check-path" pathLength="100" d="M32 49l11 11 22-23"/>

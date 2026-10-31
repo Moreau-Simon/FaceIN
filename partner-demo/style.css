@@ -630,7 +630,7 @@ body {
 }
 
 .fi-glyph {
-  position: absolute; left: 50%; top: 50%; width: 128px; height: 128px; margin: -64px 0 0 -64px; z-index: 6;
+  position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; margin: -48px 0 0 -48px; z-index: 6;
   overflow: visible; opacity: 0; pointer-events: none; color: #7DF3FF;
   filter: drop-shadow(0 0 8px rgba(0, 240, 255, .7));
 }
