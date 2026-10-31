@@ -323,7 +323,11 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
     decider_fn = lambda demande: True
     fabriquer_token = lambda utilisateur_id: "token-test"
 
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: serveur)
+    monkeypatch.setattr(
+        server_module.grpc,
+        "server",
+        lambda executor, options: serveur,
+    )
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",

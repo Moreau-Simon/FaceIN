@@ -24,6 +24,9 @@ forcé. Les appels qui dépassent ce délai de grâce peuvent encore être inter
 Chaque nœud expose aussi le protocole standard `grpc.health.v1`. Le contrôle
 Docker appelle ce service en mTLS ; l'API ne démarre qu'après que les trois
 nœuds sont déclarés sains par Docker Compose (`service_healthy`).
+Les clients gRPC de l'API et des nœuds réutilisent leurs canaux par cible,
+avec un keepalive toutes les 5 minutes. Les canaux des nœuds sont fermés à
+l'arrêt du processus ; ceux de l'API le sont à la fermeture de son lifespan.
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via

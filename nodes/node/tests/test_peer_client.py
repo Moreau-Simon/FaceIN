@@ -8,15 +8,20 @@ import consensus_pb2
 import network.peer_client as peer_client
 
 
+@pytest.fixture(autouse=True)
+def fermer_canaux_partages():
+    peer_client.fermer_canaux()
+    yield
+    peer_client.fermer_canaux()
+
+
 class CanalFactice:
     def __init__(self):
         self.adresse = None
+        self.ferme = False
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
+    def close(self):
+        self.ferme = True
 
 
 @pytest.mark.parametrize(
@@ -49,7 +54,9 @@ def test_demander_vote_retourne_identite_et_vote(
             return reponse
 
     monkeypatch.setattr(
-        peer_client.grpc, "insecure_channel", lambda address: canal
+        peer_client.grpc,
+        "insecure_channel",
+        lambda address, options: canal,
     )
     monkeypatch.setattr(
         peer_client.consensus_pb2_grpc,
@@ -85,7 +92,9 @@ def test_demander_vote_refuse_une_reponse_pour_un_autre_id(monkeypatch):
             return reponse
 
     monkeypatch.setattr(
-        peer_client.grpc, "insecure_channel", lambda address: canal
+        peer_client.grpc,
+        "insecure_channel",
+        lambda address, options: canal,
     )
     monkeypatch.setattr(
         peer_client.consensus_pb2_grpc,
@@ -118,7 +127,7 @@ def test_demander_vote_formate_correctement_une_adresse_ipv6(monkeypatch):
     monkeypatch.setattr(
         peer_client.grpc,
         "insecure_channel",
-        lambda address: adresses.append(address) or canal,
+        lambda address, options: adresses.append(address) or canal,
     )
     monkeypatch.setattr(
         peer_client.consensus_pb2_grpc,
@@ -166,8 +175,12 @@ def test_demander_vote_utilise_tls_mutuel_quand_active(monkeypatch, tmp_path):
         appels_credentials.update(kwargs)
         return credentials
 
-    def secure_channel(address, actual_credentials):
-        appels_canal.update(address=address, credentials=actual_credentials)
+    def secure_channel(address, actual_credentials, options):
+        appels_canal.update(
+            address=address,
+            credentials=actual_credentials,
+            options=options,
+        )
         return canal
 
     monkeypatch.setattr(
@@ -192,4 +205,29 @@ def test_demander_vote_utilise_tls_mutuel_quand_active(monkeypatch, tmp_path):
     assert appels_canal == {
         "address": "node-b:50052",
         "credentials": credentials,
+        "options": peer_client.GRPC_CHANNEL_OPTIONS,
     }
+
+
+def test_reutilise_et_ferme_le_canal_partage(monkeypatch):
+    monkeypatch.setenv("TLS_ENABLED", "false")
+    canal = CanalFactice()
+    creations = []
+
+    def creer_canal(address, options):
+        creations.append((address, options))
+        return canal
+
+    monkeypatch.setattr(peer_client.grpc, "insecure_channel", creer_canal)
+
+    premier = peer_client.creer_canal_securise("node-b:50052")
+    second = peer_client.creer_canal_securise("node-b:50052")
+
+    assert premier is second is canal
+    assert creations == [
+        ("node-b:50052", peer_client.GRPC_CHANNEL_OPTIONS)
+    ]
+
+    peer_client.fermer_canaux()
+
+    assert canal.ferme

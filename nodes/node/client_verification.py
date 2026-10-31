@@ -17,7 +17,7 @@ def creer_canal(address: str, insecure: bool = False):
     if insecure:
         return grpc.insecure_channel(address)
 
-    tls_enabled = os.getenv("TLS_ENABLED", "").strip().lower() in {
+    tls_enabled = os.getenv("TLS_ENABLED", "true").strip().lower() in {
         "1", "true", "yes", "on"
     }
     if not tls_enabled:

@@ -23,13 +23,19 @@ from consensus.validation import empaqueter_preuve
 
 logger = logging.getLogger(__name__)
 
+GRPC_SERVER_OPTIONS = (
+    ("grpc.keepalive_permit_without_calls", 1),
+    ("grpc.http2.min_ping_interval_without_data_ms", 300_000),
+    ("grpc.http2.max_ping_strikes", 2),
+)
+
 
 class ErreurDemarrageServeur(RuntimeError):
     """Échec du démarrage du serveur gRPC du nœud."""
 
 
 def _tls_enabled() -> bool:
-    return os.getenv("TLS_ENABLED", "false").strip().lower() in {
+    return os.getenv("TLS_ENABLED", "true").strip().lower() in {
         "1", "true", "yes", "on"
     }
 
@@ -197,7 +203,8 @@ def start_grpc_server(
     s'il en expose un : ``VerificateurZKP`` le fait, ``valider_avec_mock`` non.
     """
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=10)
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=GRPC_SERVER_OPTIONS,
     )
 
     sync_pb2_grpc.add_SyncServiceServicer_to_server(

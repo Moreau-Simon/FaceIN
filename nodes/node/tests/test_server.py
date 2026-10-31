@@ -135,7 +135,13 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
 
     monkeypatch.setenv("TLS_ENABLED", "false")
     enregistres = {}
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: ServeurFactice())
+    options_recues = {}
+
+    def creer_serveur(executor, options):
+        options_recues["options"] = options
+        return ServeurFactice()
+
+    monkeypatch.setattr(server_module.grpc, "server", creer_serveur)
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",
@@ -167,6 +173,7 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
     )
 
     assert enregistres["verification"]._store is store
+    assert options_recues["options"] == server_module.GRPC_SERVER_OPTIONS
     assert enregistres["health"].Check(
         health_pb2.HealthCheckRequest(), None
     ).status == health_pb2.HealthCheckResponse.SERVING
@@ -195,7 +202,11 @@ def test_demarrage_ouvre_un_port_tls_mutuel(monkeypatch, tmp_path):
     monkeypatch.setenv("TLS_KEY", str(key))
 
     serveur = ServeurFactice()
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: serveur)
+    monkeypatch.setattr(
+        server_module.grpc,
+        "server",
+        lambda executor, options: serveur,
+    )
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",

@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from routes.authenticate import router as authenticate_router  # noqa: E402
 from routes.nonce import router as nonce_router  # noqa: E402
 from routes.register import router as register_router  # noqa: E402
+from services.grpc_bridge import fermer_canaux  # noqa: E402
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -49,8 +50,11 @@ async def lifespan(app: FastAPI):
     """Journalise le démarrage et l'arrêt de l'API."""
     logger.info("%s", BANNER)
     logger.info("Passerelle API FaceIn démarrée.")
-    yield
-    logger.info("Arrêt de la passerelle API FaceIn.")
+    try:
+        yield
+    finally:
+        fermer_canaux()
+        logger.info("Arrêt de la passerelle API FaceIn.")
 
 
 # Initialisation de l'application FastAPI

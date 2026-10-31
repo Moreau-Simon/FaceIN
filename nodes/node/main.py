@@ -20,7 +20,7 @@ from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
 from consensus.validation import VoteExecutor, decider, VerificateurZKP
-from network.peer_client import demander_vote, envoyer_heartbeat
+from network.peer_client import demander_vote, envoyer_heartbeat, fermer_canaux
 from network.peers import PeerRegistry, formater_adresse_pair
 from network.server import ErreurDemarrageServeur, start_grpc_server
 from verification.nonces import NonceStore
@@ -309,6 +309,7 @@ def main():
     finally:
         server.stop(GRACEFUL_SHUTDOWN_SECONDS).wait()
         vote_executor.close()
+        fermer_canaux()
         for signe, gestionnaire in gestionnaires_precedents.items():
             signal.signal(signe, gestionnaire)
         logger.info(
