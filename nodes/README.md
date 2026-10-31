@@ -152,24 +152,29 @@ Attention : ca.key permet de signer des certificats reconnus par les composants 
 
 Avant de générer les certificats, vérifier que les éléments suivants sont disponibles :
 
-Windows avec PowerShell.
+Windows avec PowerShell, ou Linux/macOS avec Bash.
 OpenSSL installé et accessible depuis le terminal.
 Les fichiers ca.key et nodes/infra/tls/ca.crt.
-Le script creation_certs.ps1 à la racine du projet.
+Le script correspondant dans le dossier scripts/.
 
 Vérifier qu'OpenSSL fonctionne :
 
-powershell
+```powershell
 openssl version
+```
 
 ### 3. Générer les certificats
 
-Depuis la racine du projet FaceIN, exécuter :
+Depuis la racine du projet FaceIN, exécuter la commande correspondant à votre shell :
 
-powershell
+```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\creation_certs.ps1
+.\scripts\creation_cert.ps1
+```
 
+```bash
+bash scripts/creation_cert.sh
+```
 
 Cette modification de la politique d'exécution s'applique uniquement à la session PowerShell courante.
 
@@ -188,7 +193,9 @@ Exemple d'organisation du projet :
 ```bashtext
 FaceIN/
 ├── ca.key
-├── creation_certs.ps1
+├── scripts/
+│   ├── creation_cert.ps1
+│   └── creation_cert.sh
 ├── certs/
 │   ├── node-a.crt
 │   ├── node-a.key

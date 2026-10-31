@@ -1,9 +1,9 @@
-
 $ErrorActionPreference = "Stop"
 
-$caKey = ".\ca.key"
-$caCert = ".\nodes\infra\tls\ca.crt"
-$outDir = ".\certs"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$caKey = Join-Path $projectRoot "ca.key"
+$caCert = Join-Path $projectRoot "nodes\infra\tls\ca.crt"
+$outDir = Join-Path $projectRoot "certs"
 
 $nodes = @("node-a", "node-b", "node-c", "api-gateway")
 
