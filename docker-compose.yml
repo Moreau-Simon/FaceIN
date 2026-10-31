@@ -28,8 +28,6 @@ services:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-a.crt:/app/certs/node-a.crt:ro
       - ./certs/node-a.key:/app/certs/node-a.key:ro
-    ports:
-      - "50051:50051"
     networks:
       - reseau-verification
 
@@ -53,8 +51,6 @@ services:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-b.crt:/app/certs/node-b.crt:ro
       - ./certs/node-b.key:/app/certs/node-b.key:ro
-    ports:
-      - "50052:50052"
     networks:
       - reseau-verification
 
@@ -78,8 +74,6 @@ services:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-c.crt:/app/certs/node-c.crt:ro
       - ./certs/node-c.key:/app/certs/node-c.key:ro
-    ports:
-      - "50053:50053"
     networks:
       - reseau-verification
 
