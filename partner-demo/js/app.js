@@ -84,6 +84,18 @@ document.addEventListener('DOMContentLoaded', () => {
     guide.start();
   });
 
+  const CAMERA_MESSAGES = {
+    InsecureContext: "La webcam exige HTTPS ou http://localhost. Lancez la page via un serveur local (ex. « python -m http.server ») et non en file://.",
+    NotAllowedError: "Accès à la caméra bloqué. Cliquez sur l'icône à gauche de la barre d'adresse, autorisez la caméra, puis cliquez sur Réessayer.",
+    NotFoundError: "Aucune webcam détectée sur cet appareil.",
+    NotReadableError: "La caméra est utilisée par une autre application (Teams, Zoom, OBS…) ou bloquée par le système. Fermez-la puis réessayez.",
+    NotSupportedError: "Ce navigateur ne prend pas en charge l'accès à la webcam."
+  };
+
+  camera.on('waiting', () => {
+    if (state === 'STARTING') status.textContent = "En attente de votre autorisation — cliquez sur « Autoriser » dans la fenêtre du navigateur";
+  });
+
   camera.on('error', err => {
     if (state !== 'STARTING') return;
     state = 'ERROR';
@@ -91,11 +103,20 @@ document.addEventListener('DOMContentLoaded', () => {
     skeleton.classList.add('hidden');
     errorEl.classList.remove('hidden');
     status.textContent = 'Erreur de périphérique';
-    errorDetail.textContent =
-      err.name === 'NotAllowedError' ? "Autorisez l'accès à la webcam dans votre navigateur pour continuer."
-      : err.name === 'NotFoundError' ? 'Aucune webcam détectée sur cet appareil.'
-      : err.message || "Impossible d'accéder à la webcam.";
+    errorDetail.textContent = CAMERA_MESSAGES[err.name] || err.message || "Impossible d'accéder à la webcam.";
   });
+
+  // L'utilisateur vient de débloquer la caméra dans la barre d'adresse : on relance seul
+  camera.on('granted', () => { if (state === 'ERROR') retryCamera(); });
+
+  function retryCamera() {
+    state = 'STARTING';
+    skeleton.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+    status.textContent = 'Initialisation de la caméra…';
+    tracker.start();
+    camera.start();
+  }
 
   tracker.onMetrics = m => { if (state === 'SCANNING') guide.processMetrics(m); };
 
@@ -104,12 +125,5 @@ document.addEventListener('DOMContentLoaded', () => {
   backdrop.addEventListener('click', closeModal);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
   $('btn-simulate-step').addEventListener('click', () => serverValidation(true));
-  $('btn-retry-camera').addEventListener('click', () => {
-    state = 'STARTING';
-    skeleton.classList.remove('hidden');
-    errorEl.classList.add('hidden');
-    status.textContent = 'Initialisation de la caméra…';
-    tracker.start();
-    camera.start();
-  });
+  $('btn-retry-camera').addEventListener('click', retryCamera);
 });
