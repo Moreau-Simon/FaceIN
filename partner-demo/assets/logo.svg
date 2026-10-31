@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 120" width="100%" height="100%" fill="none">
+  <!-- Symbol FaceIN : Two complementary hexagonal gates -->
+  <g transform="translate(10, 10)">
+    <!-- Left gate : Navy Dark #0A192F / #0D2040 -->
+    <path d="M 50 5 L 85 25 L 85 45 L 60 30 L 25 50 L 25 80 L 5 70 L 5 30 Z" fill="#0A2540" />
+    <path d="M 5 70 L 25 80 L 25 50 L 5 38 Z" fill="#061A2D" opacity="0.3"/>
+    
+    <!-- Right gate : Electric Blue #0066FF -->
+    <path d="M 50 95 L 15 75 L 15 55 L 40 70 L 75 50 L 75 20 L 95 30 L 95 70 Z" fill="#0066FF" />
+    <path d="M 95 30 L 75 20 L 75 50 L 95 62 Z" fill="#0052CC" opacity="0.4"/>
+  </g>
+  
+  <!-- Typography : Face IN -->
+  <!-- "Face" in deep navy slate -->
+  <text x="140" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#0A2540" letter-spacing="-1.5">Face</text>
+  <!-- "IN" in Electric Blue -->
+  <text x="290" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#0066FF" letter-spacing="-0.5">IN</text>
+</svg>

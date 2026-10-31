@@ -1,561 +1,266 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <!--
-    FaceIn - Démonstrateur Site Partenaire (MonSiteWeb.com)
-    =======================================================
-    Ce fichier simule un site tiers partenaire intégrant le bouton "Se connecter avec FaceIn".
-    
-    Pour exécuter ce site partenaire sur le port 3001 :
-      npx serve -p 3001 partner-demo
-      ou
-      python3 -m http.server 3001 --directory partner-demo
-      
-    URL d'accès : http://localhost:3001
-  -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MonSiteWeb.com — Connexion avec FaceIn</title>
-  <style>
-    :root {
-      --bg-color: #0b0f19;
-      --card-bg: #111827;
-      --card-border: #1f2937;
-      --text-primary: #f9fafb;
-      --text-secondary: #9ca3af;
-      --text-muted: #6b7280;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --primary-glow: rgba(59, 130, 246, 0.25);
-      --success: #10b981;
-      --success-glow: rgba(16, 185, 129, 0.2);
-      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
-    }
+  <title>NovaPay &bull; Connexion sécurisée avec FaceIN</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  
+  <!-- Polices et Styles -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      background-color: var(--bg-color);
-      color: var(--text-primary);
-      font-family: var(--font-family);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      line-height: 1.6;
-    }
-
-    /* En-tête de navigation */
-    header {
-      width: 100%;
-      border-bottom: 1px solid var(--card-border);
-      background-color: rgba(17, 24, 39, 0.8);
-      backdrop-filter: blur(8px);
-      padding: 1rem 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-size: 1.25rem;
-      font-weight: 700;
-      letter-spacing: -0.025em;
-    }
-
-    .brand-icon {
-      width: 32px;
-      height: 32px;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.1rem;
-    }
-
-    .brand-badge {
-      font-size: 0.75rem;
-      padding: 0.2rem 0.6rem;
-      background-color: var(--card-border);
-      color: var(--text-secondary);
-      border-radius: 9999px;
-      font-weight: 500;
-    }
-
-    /* Conteneur principal */
-    main {
-      width: 100%;
-      max-width: 800px;
-      padding: 3rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 2rem;
-    }
-
-    /* Carte de présentation Hero */
-    .hero-card {
-      background-color: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 3rem 2.5rem;
-      text-align: center;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-card::before {
-      content: "";
-      position: absolute;
-      top: -100px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 300px;
-      height: 200px;
-      background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .hero-title {
-      font-size: 2.25rem;
-      font-weight: 800;
-      margin-bottom: 1rem;
-      background: linear-gradient(to right, #ffffff, #d1d5db);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      letter-spacing: -0.03em;
-    }
-
-    .hero-subtitle {
-      color: var(--text-secondary);
-      font-size: 1.1rem;
-      max-width: 600px;
-      margin: 0 auto 2rem auto;
-    }
-
-    /* Bouton FaceIn */
-    .btn-facein {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.75rem;
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: #ffffff;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      padding: 0.9rem 2rem;
-      font-size: 1.05rem;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 4px 15px var(--primary-glow);
-      transition: all 0.2s ease;
-    }
-
-    .btn-facein:hover {
-      background: linear-gradient(135deg, #1d4ed8, #1e40af);
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
-    }
-
-    .btn-facein:active {
-      transform: translateY(0);
-    }
-
-    .btn-facein svg {
-      width: 22px;
-      height: 22px;
-      fill: currentColor;
-    }
-
-    .security-note {
-      margin-top: 1.5rem;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-    }
-
-    /* État authentifié (masqué au départ) */
-    .auth-success-card {
-      display: none;
-      background-color: var(--card-bg);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 16px;
-      padding: 2.5rem;
-      box-shadow: 0 10px 30px var(--success-glow);
-      animation: fadeIn 0.4s ease-out;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .status-badge-container {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .status-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background-color: rgba(16, 185, 129, 0.15);
-      color: var(--success);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-    }
-
-    .status-text h2 {
-      font-size: 1.5rem;
-      color: var(--text-primary);
-      font-weight: 700;
-    }
-
-    .status-text p {
-      color: var(--text-secondary);
-      font-size: 0.95rem;
-    }
-
-    .user-info-grid {
-      background-color: rgba(11, 15, 25, 0.6);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      margin: 1.5rem 0;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1.25rem;
-    }
-
-    .info-item {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    .info-label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-    }
-
-    .info-value {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      word-break: break-all;
-    }
-
-    /* Détails du jeton JWT */
-    details {
-      margin-top: 1.5rem;
-      background-color: rgba(11, 15, 25, 0.5);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 0.75rem 1rem;
-    }
-
-    summary {
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--text-secondary);
-      user-select: none;
-    }
-
-    summary:hover {
-      color: var(--text-primary);
-    }
-
-    pre {
-      margin-top: 1rem;
-      padding: 1rem;
-      background-color: #05080e;
-      border-radius: 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.8rem;
-      color: #93c5fd;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    /* Bouton Déconnexion */
-    .btn-logout {
-      margin-top: 1.5rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background-color: transparent;
-      border: 1px solid var(--card-border);
-      color: var(--text-secondary);
-      border-radius: 8px;
-      padding: 0.6rem 1.2rem;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .btn-logout:hover {
-      border-color: #ef4444;
-      color: #ef4444;
-      background-color: rgba(239, 68, 68, 0.05);
-    }
-
-    footer {
-      margin-top: auto;
-      padding: 2rem;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      border-top: 1px solid var(--card-border);
-      width: 100%;
-    }
-  </style>
+  <!-- GSAP (animations) + MediaPipe Face Mesh (tracking 468 points) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-  <!-- Navigation -->
-  <header>
-    <div class="brand">
-      <div class="brand-icon">🌐</div>
-      <span>MonSiteWeb.com</span>
+  <!-- Dégradé dynamique d'arrière-plan (Stripe Ambient Mesh Gradient) -->
+  <div class="stripe-bg-canvas" aria-hidden="true">
+    <div class="gradient-sphere sphere-1"></div>
+    <div class="gradient-sphere sphere-2"></div>
+    <div class="gradient-sphere sphere-3"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <!-- Barre de navigation épurée style Stripe -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="partner-brand">
+        <div class="partner-symbol">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="#0A2540"/>
+            <path d="M7 17L17 7M17 7H9M17 7V15" stroke="#00D4FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="partner-name">Nova<span>Pay</span></span>
+        <span class="partner-badge">Partner Sandbox</span>
+      </div>
+
+      <div class="header-actions">
+        <a href="https://github.com/Moreau-Simon/FaceIN" target="_blank" rel="noopener" class="header-link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          Documentation
+        </a>
+        <div class="zkp-pill">
+          <span class="pulse-dot"></span>
+          ZKP Active
+        </div>
+      </div>
     </div>
-    <div class="brand-badge">Port 3001 &bull; Partenaire FaceIn</div>
   </header>
 
-  <!-- Contenu Principal -->
-  <main>
-    <!-- Section Héro (Non connecté) -->
-    <section id="hero-section" class="hero-card">
-      <h1 class="hero-title">Bienvenue sur MonSiteWeb</h1>
-      <p class="hero-subtitle">
-        Accédez à votre espace sécurisé en toute confidentialité grâce à la biométrie faciale préservant la vie privée.
-      </p>
+  <!-- Contenu Principal / Carte d'authentification -->
+  <main class="main-wrapper">
+    <div class="auth-card-container">
 
-      <button id="btn-login-facein" class="btn-facein" type="button">
-        <!-- Icône Biométrie / Visage -->
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zm6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8z"/>
-        </svg>
-        Se connecter avec FaceIn
-      </button>
-
-      <div class="security-note">
-        <span>🛡️</span>
-        <span>Authentification ZKP Groth16 sans transmission de données biométriques</span>
-      </div>
-    </section>
-
-    <!-- Section Authentifiée (Affichée après réception du token) -->
-    <section id="auth-success-section" class="auth-success-card">
-      <div class="status-badge-container">
-        <div class="status-icon">✓</div>
-        <div class="status-text">
-          <h2 id="status-title">✅ Connecté en tant que ...</h2>
-          <p>Session active vérifiée par le réseau de pairs FaceIn</p>
+      <!-- Carte d'authentification style Stripe -->
+      <section class="auth-card">
+        
+        <div class="auth-card-header">
+          <h1 class="auth-title">Accéder à votre espace bancaire</h1>
+          <p class="auth-subtitle">Plateforme marchande financière nouvelle génération</p>
         </div>
-      </div>
 
-      <div class="user-info-grid">
-        <div class="info-item">
-          <span class="info-label">Identifiant Utilisateur</span>
-          <span class="info-value" id="val-user-id">-</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Origine de vérification</span>
-          <span class="info-value" id="val-issuer">FaceIn Protocol</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Date d'authentification</span>
-          <span class="info-value" id="val-auth-time">-</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Statut du jeton</span>
-          <span class="info-value" style="color: var(--success);">Valide (JWT actif)</span>
-        </div>
-      </div>
+        <!-- BOUTON SDK FACEIN -->
+        <div class="facein-cta-wrapper">
+          <button id="btn-open-facein" class="btn-facein" type="button" aria-haspopup="dialog">
+            <span class="btn-facein-shimmer" aria-hidden="true"></span>
+            <span class="btn-facein-content">
+              <span class="facein-icon-wrapper">
+                <svg width="22" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+                  <path d="M 50 5 L 85 25 L 85 45 L 60 30 L 25 50 L 25 80 L 5 70 L 5 30 Z" fill="#FFFFFF"/>
+                  <path d="M 50 95 L 15 75 L 15 55 L 40 70 L 75 50 L 75 20 L 95 30 L 95 70 Z" fill="#38BDF8"/>
+                </svg>
+              </span>
+              <span class="btn-facein-texts">
+                <span class="btn-facein-main">Se connecter avec <span class="highlight-in">FaceIN</span></span>
+                <span class="btn-facein-sub">Identification biométrique instantanée</span>
+              </span>
+              <span class="badge-secure">Passwordless</span>
+            </span>
+          </button>
 
-      <!-- Données techniques du jeton pour vérification et inspection -->
-      <details>
-        <summary>Inspecter le jeton JWT (Payload & Signature)</summary>
-        <pre id="jwt-payload-display"></pre>
-      </details>
+          <p class="register-prompt">
+            Pas encore de compte ?
+            <a href="https://facein.com/inscription" target="_blank" rel="noopener" class="register-link">Enrôler mon visage sur facein.com/inscription &rarr;</a>
+          </p>
+        </div>
 
-      <button id="btn-logout" class="btn-logout" type="button">
-        Déconnexion
-      </button>
-    </section>
+        <!-- Séparateur "ou connexion classique" -->
+        <div class="auth-divider">
+          <span>ou continuer avec vos identifiants</span>
+        </div>
+
+        <!-- Formulaire classique (atténué pour mettre en valeur FaceIN) -->
+        <form class="legacy-form" onsubmit="event.preventDefault();">
+          <div class="form-group">
+            <label for="legacy-email">Adresse e-mail professionnelle</label>
+            <input type="email" id="legacy-email" placeholder="alex@entreprise.com" class="form-input">
+          </div>
+
+          <div class="form-group">
+            <div class="label-with-link">
+              <label for="legacy-pass">Mot de passe</label>
+              <a href="#" class="subtle-link">Oublié ?</a>
+            </div>
+            <input type="password" id="legacy-pass" placeholder="••••••••••••" class="form-input">
+          </div>
+
+          <button type="submit" class="btn-secondary" id="btn-legacy-submit">
+            <span>Connexion par mot de passe</span>
+          </button>
+        </form>
+
+        <footer class="auth-card-footer">
+          <p class="crypto-guarantee">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0066FF" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 16v-4"></path>
+              <path d="M12 8h.01"></path>
+            </svg>
+            Preuve cryptographique à divulgation nulle (ZKP Groth16). Vos traits faciaux ne sont jamais transmis.
+          </p>
+        </footer>
+
+      </section>
+
+      <!-- Panneau latéral : Présentation du protocole FaceIN -->
+      <aside class="info-sidebar">
+        <div class="info-card">
+          <div class="info-logo-row">
+            <img src="assets/logo.svg" alt="FaceIN Logo" class="brand-logo" onerror="this.style.display='none'">
+            <span class="info-version">v2.4 P2P TLS</span>
+          </div>
+
+          <h2 class="sidebar-heading">L'infrastructure d'identité décentralisée</h2>
+          <p class="sidebar-desc">
+            FaceIN élimine les mots de passe et les bases de données faciales centralisées en combinant la biométrie locale et les preuves mathématiques ZKP.
+          </p>
+
+          <ul class="features-list">
+            <li>
+              <div class="feature-icon">🛡️</div>
+              <div>
+                <strong>Confidentialité absolue (ZKP)</strong>
+                <p>Le calcul de ressemblance s'opère dans votre navigateur. Aucune photo n'est enregistrée.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feature-icon">⚡</div>
+              <div>
+                <strong>Consensus décentralisé 2/3</strong>
+                <p>3 nœuds vérificateurs indépendants valident la preuve sans intermédiaire central.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feature-icon">🔒</div>
+              <div>
+                <strong>Défi anti-rejeu éphémère</strong>
+                <p>Nonce cryptographique consommé à usage unique, immunisé contre les captures d'écran.</p>
+              </div>
+            </li>
+          </ul>
+
+          <div class="security-quote">
+            « Identity meets infrastructure. A precise, passwordless connection. »
+          </div>
+        </div>
+      </aside>
+
+    </div>
   </main>
 
-  <footer>
-    MonSiteWeb.com &bull; Démonstration d'authentification décentralisée FaceIn &bull; Port 3001
-  </footer>
+  <!-- ========================================================================= -->
+  <!-- MODALE D'AUTHENTIFICATION FACEIN                                          -->
+  <!-- ========================================================================= -->
+  <div id="facein-modal" class="fi-overlay" role="dialog" aria-modal="true" aria-labelledby="fi-title" aria-hidden="true">
+    <div class="fi-backdrop"></div>
 
-  <!-- Script d'orchestration de l'authentification FaceIn -->
-  <script>
-    // Référence vers la popup FaceIn
-    let popupWindow = null;
+    <div class="fi-modal">
+      <header class="fi-header">
+        <div class="fi-brand">
+          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <path d="M 50 5 L 85 25 L 85 45 L 60 30 L 25 50 L 25 80 L 5 70 L 5 30 Z" fill="#FFFFFF"/>
+            <path d="M 50 95 L 15 75 L 15 55 L 40 70 L 75 50 L 75 20 L 95 30 L 95 70 Z" fill="#38BDF8"/>
+          </svg>
+          <div>
+            <h3 class="fi-title" id="fi-title">Authentification FaceIN</h3>
+            <span class="fi-status" id="modal-status-text">Initialisation…</span>
+          </div>
+        </div>
+        <button id="btn-close-modal" class="fi-close" type="button" aria-label="Fermer la fenêtre">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
 
-    const heroSection = document.getElementById("hero-section");
-    const authSuccessSection = document.getElementById("auth-success-section");
-    const statusTitle = document.getElementById("status-title");
-    const valUserId = document.getElementById("val-user-id");
-    const valAuthTime = document.getElementById("val-auth-time");
-    const jwtPayloadDisplay = document.getElementById("jwt-payload-display");
-    const btnLoginFaceIn = document.getElementById("btn-login-facein");
-    const btnLogout = document.getElementById("btn-logout");
+      <div class="fi-stage" id="fi-stage">
+        <svg class="fi-ring" id="fi-ring-base" viewBox="0 0 360 360" aria-hidden="true"></svg>
+        <svg class="fi-ring fi-ring-lit" id="fi-ring-lit" viewBox="0 0 360 360" aria-hidden="true"></svg>
+        <div class="fi-wave" id="fi-wave"></div>
 
-    // Décodage simple du payload JWT en Base64 (sans vérification cryptographique côté démo)
-    function decoderPayloadJwt(token) {
-      try {
-        const segments = token.split(".");
-        if (segments.length < 2) {
-          throw new Error("Format JWT invalide (moins de 2 segments)");
-        }
-        const base64Url = segments[1];
-        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-        const jsonPayload = decodeURIComponent(
-          atob(base64)
-            .split("")
-            .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-            .join("")
-        );
-        return JSON.parse(jsonPayload);
-      } catch (err) {
-        console.error("Échec du décodage du jeton JWT :", err);
-        return null;
-      }
-    }
+        <div class="fi-medallion">
+          <div class="fi-skeleton" id="camera-skeleton"></div>
+          <video id="webcam-video" playsinline muted autoplay></video>
+          <canvas id="lidar-canvas"></canvas>
+          <div class="fi-error hidden" id="camera-error">
+            <h4>Accès à la caméra requis</h4>
+            <p id="camera-error-detail"></p>
+            <button class="fi-btn-retry" id="btn-retry-camera" type="button">Réessayer</button>
+          </div>
+        </div>
 
-    // Affichage de l'état connecté
-    function afficherConnexion(token) {
-      const payload = decoderPayloadJwt(token);
-      const userId = (payload && (payload.user_id || payload.sub || payload.id)) || "Utilisateur FaceIn";
+        <div class="fi-pill" id="fi-pill">
+          <span class="fi-pill-slot" id="fi-pill-slot"></span>
+          <span class="fi-pill-label" id="fi-pill-label"></span>
+        </div>
 
-      // Mise à jour des informations utilisateur
-      statusTitle.textContent = `✅ Connecté en tant que ${userId}`;
-      valUserId.textContent = userId;
+        <!-- Glyphe Face ID 2.5D : cadre, visage (yeux, nez, bouche), flèches gauche/droite + checkmark -->
+        <!-- viewBox élargie avec marge (-16 -16 128 128) pour éviter tout rognage lors des animations -->
+        <svg class="fi-glyph" id="fi-glyph" viewBox="-16 -16 128 128" fill="none" stroke="currentColor"
+             stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <g id="g-frame"><path d="M8 28V22a14 14 0 0 1 14-14h6M68 8h6a14 14 0 0 1 14 14v6M88 68v6a14 14 0 0 1-14 14h-6M28 88h-6A14 14 0 0 1 8 74v-6"/></g>
+          <g id="g-face">
+            <g id="g-eyes"><path id="g-eye-l" d="M34 38v8"/><path id="g-eye-r" d="M62 38v8"/></g>
+            <g id="g-nose"><path d="M48 36v18h-5"/></g>
+            <g id="g-mouth-wrap"><path id="g-mouth" d="M36 66q12 3 24 0"/></g>
+          </g>
+          <!-- Flèche directionnelle à droite du visage (avec marge de sécurité) -->
+          <g id="g-arrow-r" class="glyph-arrow">
+            <path id="g-arrow-r-path" pathLength="100" d="M86 38l7 10-7 10M72 48h21"/>
+          </g>
+          <!-- Flèche directionnelle à gauche du visage (avec marge de sécurité) -->
+          <g id="g-arrow-l" class="glyph-arrow">
+            <path id="g-arrow-l-path" pathLength="100" d="M10 38l-7 10 7 10M24 48H3"/>
+          </g>
+          <g id="g-check">
+            <circle id="g-circle" pathLength="100" cx="48" cy="48" r="34"/>
+            <path id="g-check-path" pathLength="100" d="M32 49l11 11 22-23"/>
+          </g>
+        </svg>
+      </div>
 
-      if (payload && payload.iat) {
-        const dateAuth = new Date(payload.iat * 1000);
-        valAuthTime.textContent = dateAuth.toLocaleTimeString("fr-FR", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit"
-        });
-      } else {
-        valAuthTime.textContent = new Date().toLocaleTimeString("fr-FR");
-      }
+      <div class="fi-instruction">
+        <span class="fi-step-counter" id="liveness-step-counter">Préparation…</span>
+        <h4 class="fi-step-title" id="liveness-instruction-text">Positionnez votre visage au centre</h4>
+      </div>
 
-      jwtPayloadDisplay.textContent = JSON.stringify(
-        {
-          jeton_brut: token,
-          charge_utile_decodee: payload || "Impossible de décoder le payload"
-        },
-        null,
-        2
-      );
+      <footer class="fi-footer">
+        <span class="fi-encryption">Chiffrement client &bull; Curve BN128</span>
+        <button id="btn-simulate-step" class="fi-btn-sim" type="button">Simuler validation serveur (Étape suivante)</button>
+      </footer>
+    </div>
+  </div>
 
-      // Basculer l'affichage
-      heroSection.style.display = "none";
-      authSuccessSection.style.display = "block";
-    }
+  <script src="js/camera.js"></script>
+  <script src="js/face-tracking.js"></script>
+  <script src="js/liveness-guide.js"></script>
+  <script src="js/app.js"></script>
 
-    // Réinitialisation de l'affichage (déconnexion)
-    function reinitialiserAffichage() {
-      authSuccessSection.style.display = "none";
-      heroSection.style.display = "block";
-      jwtPayloadDisplay.textContent = "";
-      valUserId.textContent = "-";
-      valAuthTime.textContent = "-";
-      statusTitle.textContent = "✅ Connecté en tant que ...";
-    }
-
-    // Clic sur "Se connecter avec FaceIn" : Ouverture de la popup
-    btnLoginFaceIn.addEventListener("click", () => {
-      const width = 500;
-      const height = 650;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-
-      const urlPopup = "http://localhost:3000/index.html?mode=login&callback=http://localhost:3001";
-
-      popupWindow = window.open(
-        urlPopup,
-        "FaceInConnexionPopup",
-        `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
-      );
-
-      if (!popupWindow || popupWindow.closed || typeof popupWindow.closed === "undefined") {
-        alert("La fenêtre popup a été bloquée par votre navigateur. Veuillez autoriser les fenêtres popups pour MonSiteWeb.com.");
-      }
-    });
-
-    // Écoute des messages postMessage envoyés par la popup FaceIn
-    window.addEventListener("message", (event) => {
-      // Tolérer localhost:3000 (ou null/file:// pour des tests locaux)
-      if (event.origin && event.origin !== "http://localhost:3000" && !event.origin.includes("localhost")) {
-        console.warn("Message ignoré venant d'une origine inconnue :", event.origin);
-        return;
-      }
-
-      const donnees = event.data;
-      if (!donnees) return;
-
-      let jwtToken = null;
-
-      // Traitement selon le format du message envoyé (chaîne JWT ou objet JSON)
-      if (typeof donnees === "string") {
-        try {
-          const parsed = JSON.parse(donnees);
-          jwtToken = parsed.token || parsed.jwt || (parsed.type === "FACEIN_AUTH_SUCCESS" ? parsed.payload : null);
-        } catch {
-          // Si ce n'est pas du JSON, vérifier s'il s'agit directement du jeton JWT (3 parties séparées par un point)
-          if (donnees.split(".").length === 3) {
-            jwtToken = donnees;
-          }
-        }
-      } else if (typeof donnees === "object") {
-        jwtToken = donnees.token || donnees.jwt || (donnees.type === "FACEIN_AUTH_SUCCESS" ? (donnees.payload || donnees.token) : null);
-      }
-
-      if (jwtToken) {
-        // Fermer la popup si elle est toujours ouverte
-        if (popupWindow && !popupWindow.closed) {
-          popupWindow.close();
-        }
-        afficherConnexion(jwtToken);
-      }
-    });
-
-    // Gestion du bouton de déconnexion
-    btnLogout.addEventListener("click", () => {
-      reinitialiserAffichage();
-    });
-  </script>
 </body>
 </html>
