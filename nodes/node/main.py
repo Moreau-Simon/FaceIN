@@ -36,6 +36,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+GRACEFUL_SHUTDOWN_SECONDS = 8
+
 
 def _journaliser_changement_etat(
     node_id: str,
@@ -305,7 +307,7 @@ def main():
     except KeyboardInterrupt:
         arret_demande.set()
     finally:
-        server.stop(0).wait()
+        server.stop(GRACEFUL_SHUTDOWN_SECONDS).wait()
         vote_executor.close()
         for signe, gestionnaire in gestionnaires_precedents.items():
             signal.signal(signe, gestionnaire)

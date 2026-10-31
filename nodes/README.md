@@ -17,8 +17,10 @@ L'intervalle et le délai maximal d'un appel heartbeat sont configurés dans
 `shared/config/noeuds.yaml`, sous `heartbeat`. Chaque cycle attend le pair le
 plus lent, dans la limite du délai de chaque appel.
 `docker-compose.yml` accorde 10 secondes à chaque nœud pour s'arrêter après
-`docker stop`. Ce délai est supérieur au timeout heartbeat configuré (3 s),
-avec une marge pour terminer les appels en cours et fermer le serveur.
+`docker stop`. À la réception du signal d'arrêt, le serveur gRPC attend jusqu'à
+8 secondes (`GRACEFUL_SHUTDOWN_SECONDS` dans `node/main.py`) que les appels en
+cours se terminent ; Docker conserve ensuite 2 secondes de marge avant un arrêt
+forcé. Les appels qui dépassent ce délai de grâce peuvent encore être interrompus.
 Chaque nœud expose aussi le protocole standard `grpc.health.v1`. Le contrôle
 Docker appelle ce service en mTLS ; l'API ne démarre qu'après que les trois
 nœuds sont déclarés sains par Docker Compose (`service_healthy`).

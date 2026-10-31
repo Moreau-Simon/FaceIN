@@ -29,9 +29,11 @@ class ErreurHeartbeatDetaillee(grpc.RpcError):
 class ServeurFactice:
     def __init__(self):
         self.arret_demande = False
+        self.delai_arret = None
 
     def stop(self, grace):
         self.arret_demande = True
+        self.delai_arret = grace
         return self
 
     def wait(self):
@@ -466,3 +468,4 @@ def test_main_arrete_proprement_sur_sigterm(monkeypatch):
 
     assert evenement.arret_demande
     assert serveur.arret_demande
+    assert serveur.delai_arret == main_module.GRACEFUL_SHUTDOWN_SECONDS

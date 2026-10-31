@@ -13,8 +13,7 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-a
-    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
-    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    # 8 s de grâce gRPC dans main.py, puis 2 s de marge avant arrêt forcé.
     stop_grace_period: 10s
     environment:
       - NODE_ID=node-a
@@ -36,8 +35,7 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-b
-    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
-    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    # 8 s de grâce gRPC dans main.py, puis 2 s de marge avant arrêt forcé.
     stop_grace_period: 10s
     environment:
       - NODE_ID=node-b
@@ -59,8 +57,7 @@ services:
       context: ./nodes
       dockerfile: node/Dockerfile
     container_name: node-c
-    # Doit dépasser le timeout heartbeat (3 s dans noeuds.yaml), avec marge
-    # pour terminer les appels en cours et arrêter le serveur gRPC.
+    # 8 s de grâce gRPC dans main.py, puis 2 s de marge avant arrêt forcé.
     stop_grace_period: 10s
     environment:
       - NODE_ID=node-c
