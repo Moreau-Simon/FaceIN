@@ -314,10 +314,16 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
         def add_insecure_port(self, adresse):
             return 50051
 
+        def add_secure_port(self, adresse, credentials):
+            return 50051
+
         def start(self):
             return None
 
     serveur = ServeurFactice()
+    monkeypatch.setattr(
+        server_module, "charger_credentials_serveur", lambda: object()
+    )
     services_enregistres = {}
     nonces = NonceStore()
     decider_fn = lambda demande: True

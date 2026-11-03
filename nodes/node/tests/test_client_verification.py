@@ -59,7 +59,7 @@ def test_creer_canal_exige_tls_sauf_option_insecure(monkeypatch):
         lambda address: appels.append(address) or canal,
     )
 
-    with pytest.raises(RuntimeError, match="TLS_ENABLED"):
+    with pytest.raises(RuntimeError, match="TLS_CERT"):
         client_verification.creer_canal("node-a:50051")
 
     assert client_verification.creer_canal(
