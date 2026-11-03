@@ -4,16 +4,13 @@ le consensus de vote et la vérification des preuves cryptographiques ZKP.
 """
 
 import logging
+import os
 import uuid
 from concurrent import futures
-
-try:
-    import grpc
-except ImportError:
-    grpc = None
-
-import os
 from pathlib import Path
+
+import grpc
+from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 
 import sync_pb2
 import sync_pb2_grpc
@@ -26,8 +23,19 @@ from consensus.validation import empaqueter_preuve
 
 logger = logging.getLogger(__name__)
 
+GRPC_SERVER_OPTIONS = (
+    ("grpc.keepalive_permit_without_calls", 1),
+    ("grpc.http2.min_ping_interval_without_data_ms", 300_000),
+    ("grpc.http2.max_ping_strikes", 2),
+)
+
+
+class ErreurDemarrageServeur(RuntimeError):
+    """Échec du démarrage du serveur gRPC du nœud."""
+
+
 def _tls_enabled() -> bool:
-    return os.getenv("TLS_ENABLED", "false").strip().lower() in {
+    return os.getenv("TLS_ENABLED", "true").strip().lower() in {
         "1", "true", "yes", "on"
     }
 
@@ -58,10 +66,6 @@ def charger_credentials_serveur():
         require_client_auth=True,
     )
 
-class ErreurDemarrageServeur(RuntimeError):
-    """Échec du démarrage du serveur gRPC du nœud."""
-
-
 class SyncService(sync_pb2_grpc.SyncServiceServicer):
     """Implémente le service de synchronisation exposé par le noeud."""
 
@@ -70,8 +74,8 @@ class SyncService(sync_pb2_grpc.SyncServiceServicer):
 
     def Heartbeat(self, request, context):
         """Confirme que le noeud répond aux appels gRPC."""
-        logger.info(
-            "[%s] Heartbeat reçu de %s",
+        logger.debug(
+            "[%s] Battement de cœur reçu de %s",
             self.node_id,
             request.noeud_id,
         )
@@ -199,7 +203,8 @@ def start_grpc_server(
     s'il en expose un : ``VerificateurZKP`` le fait, ``valider_avec_mock`` non.
     """
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=10)
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=GRPC_SERVER_OPTIONS,
     )
 
     sync_pb2_grpc.add_SyncServiceServicer_to_server(
@@ -222,6 +227,10 @@ def start_grpc_server(
         ),
         server,
     )
+
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     if _tls_enabled():
         credentials = charger_credentials_serveur()

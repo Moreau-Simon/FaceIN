@@ -17,8 +17,16 @@ L'intervalle et le délai maximal d'un appel heartbeat sont configurés dans
 `shared/config/noeuds.yaml`, sous `heartbeat`. Chaque cycle attend le pair le
 plus lent, dans la limite du délai de chaque appel.
 `docker-compose.yml` accorde 10 secondes à chaque nœud pour s'arrêter après
-`docker stop`. Ce délai est supérieur au timeout heartbeat configuré (3 s),
-avec une marge pour terminer les appels en cours et fermer le serveur.
+`docker stop`. À la réception du signal d'arrêt, le serveur gRPC attend jusqu'à
+8 secondes (`GRACEFUL_SHUTDOWN_SECONDS` dans `node/main.py`) que les appels en
+cours se terminent ; Docker conserve ensuite 2 secondes de marge avant un arrêt
+forcé. Les appels qui dépassent ce délai de grâce peuvent encore être interrompus.
+Chaque nœud expose aussi le protocole standard `grpc.health.v1`. Le contrôle
+Docker appelle ce service en mTLS ; l'API ne démarre qu'après que les trois
+nœuds sont déclarés sains par Docker Compose (`service_healthy`).
+Les clients gRPC de l'API et des nœuds réutilisent leurs canaux par cible,
+avec un keepalive toutes les 5 minutes. Les canaux des nœuds sont fermés à
+l'arrêt du processus ; ceux de l'API le sont à la fermeture de son lifespan.
 
 C'est volontairement minimal : l'objectif de cette première étape est de
 valider que l'architecture "un seul code, plusieurs instances via
@@ -84,11 +92,18 @@ Après `docker compose up --build`, lancez depuis la racine :
 docker compose exec node-a python client_verification.py --utilisateur-id demo --preuve preuve-de-test
 ```
 
+Le client utilise le mTLS configuré dans le conteneur (`TLS_CA_CERT`,
+`TLS_CERT` et `TLS_KEY`) et se connecte à `node-a:50051`, nom correspondant
+au SAN du certificat. Ne remplacez pas cette adresse par `localhost` : le
+certificat du nœud ne couvre pas ce nom.
+
 `--preuve preuve-de-test` est uniquement une valeur fictive : le mock actuel
 l'accepte parce qu'elle n'est pas vide. N'utilisez pas ce client, le mock ou
 le token actuel pour protéger un service réel. Pour joindre un autre nœud ou
 utiliser d'autres valeurs, fournissez `--address`, `--utilisateur-id`,
 `--preuve` et éventuellement `--service-cible`.
+L'option `--insecure` ne doit être utilisée que pour un test où le serveur a
+explicitement désactivé TLS.
 
 ## Config partagée
 
@@ -97,6 +112,8 @@ et leurs pairs (`NODE_ID`, `NODE_PORT`, `PEERS`). Le fichier
 `shared/config/noeuds.yaml` contient les paramètres partagés de consensus,
 de synchronisation Merkle et de heartbeat, chargés et validés au démarrage
 par `node/config.py`.
+Les pairs IPv4 et DNS utilisent `hostname:port`; les adresses IPv6 doivent
+être entre crochets, par exemple `[2001:db8::2]:50052`.
 
 Les `NODE_ID` sont considérés comme stables pendant l'exécution. Le registre
 associe l'identité annoncée à l'adresse du pair et refuse qu'elle change à
@@ -140,24 +157,29 @@ Attention : ca.key permet de signer des certificats reconnus par les composants 
 
 Avant de générer les certificats, vérifier que les éléments suivants sont disponibles :
 
-Windows avec PowerShell.
+Windows avec PowerShell, ou Linux/macOS avec Bash.
 OpenSSL installé et accessible depuis le terminal.
 Les fichiers ca.key et nodes/infra/tls/ca.crt.
-Le script creation_certs.ps1 à la racine du projet.
+Le script correspondant dans le dossier scripts/.
 
 Vérifier qu'OpenSSL fonctionne :
 
-powershell
+```powershell
 openssl version
+```
 
 ### 3. Générer les certificats
 
-Depuis la racine du projet FaceIN, exécuter :
+Depuis la racine du projet FaceIN, exécuter la commande correspondant à votre shell :
 
-powershell
+```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\creation_certs.ps1
+.\scripts\creation_cert.ps1
+```
 
+```bash
+bash scripts/creation_cert.sh
+```
 
 Cette modification de la politique d'exécution s'applique uniquement à la session PowerShell courante.
 
@@ -176,7 +198,9 @@ Exemple d'organisation du projet :
 ```bashtext
 FaceIN/
 ├── ca.key
-├── creation_certs.ps1
+├── scripts/
+│   ├── creation_cert.ps1
+│   └── creation_cert.sh
 ├── certs/
 │   ├── node-a.crt
 │   ├── node-a.key

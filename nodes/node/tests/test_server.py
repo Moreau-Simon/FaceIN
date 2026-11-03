@@ -8,6 +8,7 @@ import json
 import pytest
 
 import network.server as server_module
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 import verification_pb2
 from consensus.validation import VerificateurZKP
 from network.server import VerificationService
@@ -134,7 +135,13 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
 
     monkeypatch.setenv("TLS_ENABLED", "false")
     enregistres = {}
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: ServeurFactice())
+    options_recues = {}
+
+    def creer_serveur(executor, options):
+        options_recues["options"] = options
+        return ServeurFactice()
+
+    monkeypatch.setattr(server_module.grpc, "server", creer_serveur)
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",
@@ -150,6 +157,11 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
         "add_VerificationServiceServicer_to_server",
         lambda service, serveur: enregistres.update(verification=service),
     )
+    monkeypatch.setattr(
+        health_pb2_grpc,
+        "add_HealthServicer_to_server",
+        lambda service, serveur: enregistres.update(health=service),
+    )
 
     server_module.start_grpc_server(
         "node-a",
@@ -161,6 +173,10 @@ def test_demarrage_branche_le_store_du_verificateur(monkeypatch, store):
     )
 
     assert enregistres["verification"]._store is store
+    assert options_recues["options"] == server_module.GRPC_SERVER_OPTIONS
+    assert enregistres["health"].Check(
+        health_pb2.HealthCheckRequest(), None
+    ).status == health_pb2.HealthCheckResponse.SERVING
 
 
 def test_demarrage_ouvre_un_port_tls_mutuel(monkeypatch, tmp_path):
@@ -186,7 +202,11 @@ def test_demarrage_ouvre_un_port_tls_mutuel(monkeypatch, tmp_path):
     monkeypatch.setenv("TLS_KEY", str(key))
 
     serveur = ServeurFactice()
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: serveur)
+    monkeypatch.setattr(
+        server_module.grpc,
+        "server",
+        lambda executor, options: serveur,
+    )
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",
@@ -200,6 +220,11 @@ def test_demarrage_ouvre_un_port_tls_mutuel(monkeypatch, tmp_path):
     monkeypatch.setattr(
         server_module.verification_pb2_grpc,
         "add_VerificationServiceServicer_to_server",
+        lambda service, serveur: None,
+    )
+    monkeypatch.setattr(
+        health_pb2_grpc,
+        "add_HealthServicer_to_server",
         lambda service, serveur: None,
     )
     credentials = object()

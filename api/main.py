@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from routes.authenticate import router as authenticate_router  # noqa: E402
 from routes.nonce import router as nonce_router  # noqa: E402
 from routes.register import router as register_router  # noqa: E402
+from services.grpc_bridge import fermer_canaux  # noqa: E402
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -47,11 +48,14 @@ BANNER = r"""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Cycle de vie de l'application FastAPI : affiche la bannière au démarrage."""
-    print(BANNER)
-    logger.info("Passerelle API FaceIn démarrée avec succès.")
-    yield
-    logger.info("Arrêt de la passerelle API FaceIn.")
+    """Journalise le démarrage et l'arrêt de l'API."""
+    logger.info("%s", BANNER)
+    logger.info("Passerelle API FaceIn démarrée.")
+    try:
+        yield
+    finally:
+        fermer_canaux()
+        logger.info("Arrêt de la passerelle API FaceIn.")
 
 
 # Initialisation de l'application FastAPI

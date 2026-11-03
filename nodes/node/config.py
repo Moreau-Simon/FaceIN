@@ -7,10 +7,12 @@ Deux sources de configuration :
 Variables d'environnement :
     NODE_ID     : identifiant unique du nœud (obligatoire)
     NODE_PORT   : port gRPC du nœud (défaut : 50051)
-    PEERS       : pairs au format hostname:port, séparés par des virgules
+    PEERS       : pairs au format hostname:port ou [adresse IPv6]:port,
+                  séparés par des virgules
     CONFIG_PATH : chemin explicite du YAML (optionnel, utile pour les tests)
 """
 
+import ipaddress
 import os
 
 import yaml
@@ -25,7 +27,7 @@ CHEMIN_RELATIF = os.path.abspath(
         "noeuds.yaml",
     )
 )
-HOTES_LOCAUX = {"localhost", "127.0.0.1"}
+HOTES_LOCAUX = {"localhost", "127.0.0.1", "::1"}
 
 
 class ErreurConfiguration(RuntimeError):
@@ -180,14 +182,29 @@ def _parser_peers(peers_raw: str) -> list[dict[str, object]]:
         if not peer:
             continue
 
-        if peer.count(":") != 1:
-            raise ErreurConfiguration(
-                f"Format de pair invalide : {peer!r}. "
-                "Format attendu : hostname:port"
-            )
-
-        host, port_raw = peer.split(":")
-        host = host.strip()
+        if peer.startswith("["):
+            fin_hote = peer.find("]")
+            if fin_hote <= 1 or peer[fin_hote + 1:fin_hote + 2] != ":":
+                raise ErreurConfiguration(
+                    f"Format de pair invalide : {peer!r}. "
+                    "Pour IPv6, utilisez [adresse]:port"
+                )
+            host = peer[1:fin_hote].strip()
+            port_raw = peer[fin_hote + 2:]
+            try:
+                ipaddress.IPv6Address(host)
+            except ipaddress.AddressValueError as exc:
+                raise ErreurConfiguration(
+                    f"Adresse IPv6 invalide dans le pair : {peer!r}"
+                ) from exc
+        else:
+            if peer.count(":") != 1:
+                raise ErreurConfiguration(
+                    f"Format de pair invalide : {peer!r}. "
+                    "Format attendu : hostname:port ou [adresse IPv6]:port"
+                )
+            host, port_raw = peer.split(":", 1)
+            host = host.strip()
 
         if not host:
             raise ErreurConfiguration(
@@ -227,12 +244,24 @@ def _verifier_pas_auto_reference(
     for peer in peers:
         host = str(peer["host"]).lower()
         est_soi_par_nom = host == node_id.lower()
-        est_soi_en_local = host in HOTES_LOCAUX and peer["port"] == node_port
+        try:
+            est_adresse_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            est_adresse_loopback = False
+        est_soi_en_local = (
+            (host in HOTES_LOCAUX or est_adresse_loopback)
+            and peer["port"] == node_port
+        )
 
         if est_soi_par_nom or est_soi_en_local:
+            adresse = (
+                f"[{host}]:{peer['port']}"
+                if ":" in host
+                else f"{host}:{peer['port']}"
+            )
             raise ErreurConfiguration(
                 f"Le nœud {node_id!r} est listé parmi ses propres pairs "
-                f"({host}:{peer['port']}) : corrigez PEERS"
+                f"({adresse}) : corrigez PEERS"
             )
 
 

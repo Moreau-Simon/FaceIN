@@ -3,7 +3,7 @@ transitions retournées, pairs non hors ligne, validation stricte des types."""
 
 import pytest
 
-from network.peers import PeerRegistry, cle_pair
+from network.peers import PeerRegistry, cle_pair, formater_adresse_pair
 
 
 @pytest.fixture
@@ -23,6 +23,13 @@ def test_cle_pair_normalise_la_casse_et_les_espaces():
 
 def test_cle_pair_distingue_les_ports():
     assert cle_pair("node-b", 1) != cle_pair("node-b", 2)
+
+
+def test_cle_pair_formate_ipv6_sans_ambiguite():
+    assert cle_pair("2001:db8::1", 50052) == "[2001:db8::1]:50052"
+    assert formater_adresse_pair("2001:db8::1", 50052) == (
+        "[2001:db8::1]:50052"
+    )
 
 
 # ---------------------------------------------------------------------------
