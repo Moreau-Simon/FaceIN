@@ -17,6 +17,7 @@ if BASE_DIR not in sys.path:
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from routes.authenticate import router as authenticate_router  # noqa: E402
 from routes.nonce import router as nonce_router  # noqa: E402
@@ -76,7 +77,6 @@ app.include_router(nonce_router, prefix="/api", tags=["Nonce"])
 app.include_router(authenticate_router, prefix="/api", tags=["Authentification"])
 
 
-@app.get("/", tags=["Statut"])
 @app.get("/api/health", tags=["Statut"])
 def health_check():
     """Endpoint de contrôle de l'état de santé du service."""
@@ -85,6 +85,19 @@ def health_check():
         "service": "FaceIn API Gateway",
         "version": "1.0.0",
     }
+
+
+# Service du frontend de démonstration partenaire (port 8000 unifié)
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+PARTNER_DEMO_DIR = os.path.join(PROJECT_ROOT, "partner-demo")
+
+if os.path.isdir(PARTNER_DEMO_DIR):
+    app.mount("/demo", StaticFiles(directory=PARTNER_DEMO_DIR, html=True), name="partner-demo-alias")
+    app.mount("/", StaticFiles(directory=PARTNER_DEMO_DIR, html=True), name="partner-demo")
+else:
+    @app.get("/", tags=["Statut"])
+    def root_status():
+        return health_check()
 
 
 if __name__ == "__main__":
