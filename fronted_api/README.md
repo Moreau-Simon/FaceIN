@@ -14,7 +14,7 @@ L'application s'exécute **intégralement dans le navigateur** en utilisant :
 ## 📁 Architecture des fichiers
 
 ```text
-frontend/
+fronted_api/
 ├── index.html              # Page principale (onglets Inscription & Connexion, affichage vidéo, statut et logs)
 ├── css/
 │   └── style.css           # Thème sombre moderne et ergonomique
@@ -37,10 +37,10 @@ frontend/
 
 L'application nécessite les modèles pré-entraînés pour la détection SSD MobileNet V1, les 68 points de repère faciaux, et l'extraction de descripteur de visage.
 
-Placez-vous dans le dossier `frontend/models/` et téléchargez les 7 fichiers requis depuis le dépôt officiel :
+Placez-vous dans le dossier `fronted_api/models/` et téléchargez les 7 fichiers requis depuis le dépôt officiel :
 
 ```bash
-cd frontend/models
+cd fronted_api/models
 
 # Base URL des poids officiels
 BASE_URL="https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights"
@@ -65,15 +65,15 @@ cd ../..
 
 ### 2. Copier les fichiers du circuit ZKP
 
-Après compilation du circuit Circom (Phase 2), copiez les artéfacts vers `frontend/circuit/` :
+Après compilation du circuit Circom (Phase 2), copiez les artéfacts vers `fronted_api/circuit/` :
 
 ```bash
-mkdir -p frontend/circuit
-cp circuits/build/distance_js/distance.wasm frontend/circuit/
-cp circuits/build/distance.zkey frontend/circuit/
+mkdir -p fronted_api/circuit
+cp circuits/build/distance_js/distance.wasm fronted_api/circuit/
+cp circuits/build/distance.zkey fronted_api/circuit/
 ```
 
-Vérifiez que les chemins correspondent à ceux définis dans [js/config.js](file:///Users/ddeci/Documents/BUT3/SEMESTRE_5/SAE/FaceIN/frontend/js/config.js) :
+Vérifiez que les chemins correspondent à ceux définis dans [js/config.js](./js/config.js) :
 - `WASM_PATH`: `./circuit/distance.wasm`
 - `ZKEY_PATH`: `./circuit/distance.zkey`
 
@@ -87,13 +87,13 @@ Vous pouvez utiliser n'importe quel serveur statique :
 
 #### Avec Python 3 :
 ```bash
-cd frontend
+cd fronted_api
 python3 -m http.server 3000
 ```
 
 #### Avec Node.js (npx serve) :
 ```bash
-npx serve frontend -p 3000
+npx serve fronted_api -p 3000
 ```
 
 ---

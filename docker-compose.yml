@@ -112,7 +112,7 @@ services:
     container_name: facein-frontend
     working_dir: /app
     volumes:
-      - ./frontend:/app
+      - ./fronted_api:/app
     command: python -m http.server 3000
     ports:
       - "3000:3000"

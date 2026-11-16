@@ -16,7 +16,7 @@
 # Non couvert volontairement :
 # - lab_ia/       : prototypes ML exploratoires (dépendances non épinglées, modèles lourds)
 # - partner-demo/ : démo statique, rien à tester automatiquement
-# - frontend/     : statique, validé via le health check HTTP du job docker
+# - fronted_api/  : statique, validé via le health check HTTP du job docker
 
 name: FaceIN CI
 
