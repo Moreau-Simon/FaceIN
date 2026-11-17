@@ -57,61 +57,60 @@ import api.main as api_main  # noqa: E402
 
 
 
+
 class TestStoreService(unittest.TestCase):
-    """Tests du module store.py (stockage SQLite des engagements et nonces)."""
+    """Tests du module store.py avec le backend mémoire."""
 
     def setUp(self):
-        # Utilisation d'un fichier SQLite temporaire isolé pour chaque test
-        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp(suffix=".db")
-        os.close(self.temp_db_fd)
-        store.init_db(self.temp_db_path)
+        store.reset_store()
+        self.storage = store.get_store()
 
     def tearDown(self):
-        if os.path.exists(self.temp_db_path):
-            os.remove(self.temp_db_path)
+        store.reset_store()
 
     def test_save_and_get_commitment(self):
         user_id = "alice"
         commitment = "0x123456789abcdef"
 
-        self.assertFalse(store.user_exists(user_id, self.temp_db_path))
-        self.assertIsNone(store.get_commitment(user_id, self.temp_db_path))
+        self.assertIsNone(self.storage.get_engagement(user_id))
 
-        store.save_commitment(user_id, commitment, self.temp_db_path)
+        self.storage.save_engagement(user_id, commitment)
 
-        self.assertTrue(store.user_exists(user_id, self.temp_db_path))
-        self.assertEqual(store.get_commitment(user_id, self.temp_db_path), commitment)
+        engagement = self.storage.get_engagement(user_id)
+        self.assertIsNotNone(engagement)
+        self.assertEqual(engagement["commitment"], commitment)
 
-    def test_save_duplicate_commitment_raises_error(self):
+    def test_save_commitment_replaces_previous_commitment(self):
         user_id = "bob"
-        commitment = "0xabc123"
 
-        store.save_commitment(user_id, commitment, self.temp_db_path)
-        with self.assertRaises(Exception):
-            store.save_commitment(user_id, commitment, self.temp_db_path)
+        self.storage.save_engagement(user_id, "0xold")
+        self.storage.save_engagement(user_id, "0xabc123")
+
+        engagement = self.storage.get_engagement(user_id)
+        self.assertEqual(engagement["commitment"], "0xabc123")
 
     def test_nonce_lifecycle_and_single_use(self):
         user_id = "charlie"
         nonce = "test-nonce-12345"
-        expires_at = time.time() + 60.0  # Expire dans 60 secondes
+        expires_at = time.time() + 60.0
 
-        store.save_nonce(nonce, user_id, expires_at, self.temp_db_path)
+        self.storage.save_nonce(nonce, user_id, expires_at)
 
-        # Première vérification : doit être valide
-        self.assertTrue(store.verify_nonce(nonce, user_id, self.temp_db_path))
+        # Première utilisation : nonce valide
+        self.assertTrue(self.storage.consume_nonce(nonce, user_id))
 
-        # Deuxième vérification (rejeu) : doit être invalide car supprimé
-        self.assertFalse(store.verify_nonce(nonce, user_id, self.temp_db_path))
+        # Deuxième utilisation : nonce déjà consommé
+        self.assertFalse(self.storage.consume_nonce(nonce, user_id))
 
     def test_expired_nonce(self):
         user_id = "david"
         nonce = "expired-nonce-000"
-        expires_at = time.time() - 10.0  # Expiré il y a 10 secondes
+        expires_at = time.time() - 10.0
 
-        store.save_nonce(nonce, user_id, expires_at, self.temp_db_path)
+        self.storage.save_nonce(nonce, user_id, expires_at)
 
-        # Vérification d'un nonce expiré : doit retourner False
-        self.assertFalse(store.verify_nonce(nonce, user_id, self.temp_db_path))
+        self.assertFalse(self.storage.consume_nonce(nonce, user_id))
+
 
 
 class TestZkpVerifier(unittest.TestCase):
@@ -300,17 +299,14 @@ class TestJwtManager(unittest.TestCase):
 class TestAuthenticateLogic(unittest.TestCase):
     """Tests des 6 étapes d'authentification de la route authenticate."""
 
+    
     def setUp(self):
-        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp(suffix=".db")
-        os.close(self.temp_db_fd)
-        store.init_db(self.temp_db_path)
-        self.original_db = store.DB_PATH
-        store.DB_PATH = self.temp_db_path
+        store.reset_store()
+        self.storage = store.get_store()
 
     def tearDown(self):
-        store.DB_PATH = self.original_db
-        if os.path.exists(self.temp_db_path):
-            os.remove(self.temp_db_path)
+        store.reset_store()
+
 
     def test_auth_step1_invalid_nonce(self):
         from routes.authenticate import authenticate, AuthenticateRequest
@@ -329,7 +325,7 @@ class TestAuthenticateLogic(unittest.TestCase):
         from routes.authenticate import authenticate, AuthenticateRequest
 
         nonce = "nonce-valid-step2"
-        store.save_nonce(nonce, "user_unknown", time.time() + 60)
+        self.storage.save_nonce(nonce, "user_unknown", time.time() + 60)
 
         req = AuthenticateRequest(
             user_id="user_unknown",
@@ -346,8 +342,8 @@ class TestAuthenticateLogic(unittest.TestCase):
 
         user_id = "user_step3"
         nonce = "nonce-step3"
-        store.save_commitment(user_id, "0xexpected_commitment")
-        store.save_nonce(nonce, user_id, time.time() + 60)
+        self.storage.save_engagement(user_id, "0xexpected_commitment")
+        self.storage.save_nonce(nonce, user_id, time.time() + 60)
 
         req = AuthenticateRequest(
             user_id=user_id,
@@ -365,8 +361,8 @@ class TestAuthenticateLogic(unittest.TestCase):
         user_id = "user_step4"
         nonce = "nonce-step4"
         commitment = "0xmatch"
-        store.save_commitment(user_id, commitment)
-        store.save_nonce(nonce, user_id, time.time() + 60)
+        self.storage.save_engagement(user_id, commitment)
+        self.storage.save_nonce(nonce, user_id, time.time() + 60)
 
         # Désactiver le mock ZKP pour forcer le rejet (fichier introuvable ou preuve invalide)
         os.environ.pop("MOCK_ZKP_VERIFICATION", None)
@@ -389,8 +385,8 @@ class TestAuthenticateLogic(unittest.TestCase):
         user_id = "user_step6"
         nonce = "nonce-step6"
         commitment = "0xcorrect_commitment"
-        store.save_commitment(user_id, commitment)
-        store.save_nonce(nonce, user_id, time.time() + 60)
+        self.storage.save_engagement(user_id, commitment)
+        self.storage.save_nonce(nonce, user_id, time.time() + 60)
 
         # Activer le mock ZKP
         os.environ["MOCK_ZKP_VERIFICATION"] = "true"
@@ -420,16 +416,11 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
     """Tests des routes register et nonce."""
 
     def setUp(self):
-        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp(suffix=".db")
-        os.close(self.temp_db_fd)
-        store.init_db(self.temp_db_path)
-        self.original_db = store.DB_PATH
-        store.DB_PATH = self.temp_db_path
+        store.reset_store()
+        self.storage = store.get_store()
 
     def tearDown(self):
-        store.DB_PATH = self.original_db
-        if os.path.exists(self.temp_db_path):
-            os.remove(self.temp_db_path)
+        store.reset_store()
 
     def test_register_success(self):
         from routes.register import register, RegisterRequest
@@ -438,7 +429,7 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
         res = register(req)
         self.assertTrue(res.success)
         self.assertEqual(res.message, "Engagement enregistré")
-        self.assertTrue(store.user_exists("new_user"))
+        self.assertIsNotNone(self.storage.get_engagement("new_user"))
 
     def test_register_conflict(self):
         from routes.register import register, RegisterRequest
