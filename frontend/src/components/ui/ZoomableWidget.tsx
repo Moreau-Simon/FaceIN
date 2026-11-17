@@ -19,17 +19,6 @@ export function ZoomableWidget({ title, children }: ZoomableWidgetProps) {
     if (!isOpen && dialog.open) dialog.close();
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsOpen(false);
-    };
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isOpen]);
-
   return (
     <div className="zoomable-widget">
       {children}

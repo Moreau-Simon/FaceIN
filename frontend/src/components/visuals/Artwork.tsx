@@ -1,9 +1,10 @@
 import { useId } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
-export function RibbonArtwork({ className = "" }: { className?: string }) {
+export function RibbonArtwork({ className = "", animated = true }: { className?: string; animated?: boolean }) {
   const gradientId = useId().replaceAll(":", "");
   const reduceMotion = useReducedMotion();
+  const shouldAnimate = animated && !reduceMotion;
 
   return (
     <svg
@@ -33,22 +34,22 @@ export function RibbonArtwork({ className = "" }: { className?: string }) {
       <motion.path
         d="M0 0h362c72 156 157 290 215 421 36 81 39 145 22 199h-91c12-75 3-139-43-202C375 275 184 132 0 0Z"
         fill={`url(#${gradientId}-blue)`}
-        initial={reduceMotion ? false : { opacity: 0.65, x: 16 }}
-        animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+        initial={shouldAnimate ? { opacity: 0.65, x: 16 } : false}
+        animate={shouldAnimate ? { opacity: 1, x: 0 } : undefined}
         transition={{ duration: 1.15, ease: [0.22, 1, 0.36, 1] }}
       />
       <motion.path
         d="M228 0h286c60 148 85 282 68 389-10 67-36 115-68 142-31-103-102-239-286-531Z"
         fill={`url(#${gradientId}-sunset)`}
-        initial={reduceMotion ? false : { opacity: 0.65, x: 12 }}
-        animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+        initial={shouldAnimate ? { opacity: 0.65, x: 12 } : false}
+        animate={shouldAnimate ? { opacity: 1, x: 0 } : undefined}
         transition={{ duration: 1.05, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
       />
       <motion.path
         d="M470 0h152c59 168 58 349 13 493-22 70-32 113-23 127h-83c-10-66 16-136 38-218 36-135 16-272-97-402Z"
         fill={`url(#${gradientId}-lilac)`}
-        initial={reduceMotion ? false : { opacity: 0.65, x: 8 }}
-        animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+        initial={shouldAnimate ? { opacity: 0.65, x: 8 } : false}
+        animate={shouldAnimate ? { opacity: 1, x: 0 } : undefined}
         transition={{ duration: 0.95, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
       />
       <path d="M347 10c109 154 188 298 215 440" fill="none" stroke="white" strokeOpacity=".65" />
@@ -77,7 +78,7 @@ export function ProofRays() {
       className="proof-rays"
       viewBox="0 0 800 280"
       role="img"
-      aria-label="Visualisation abstraite d'une preuve vérifiée par plusieurs nœuds"
+      aria-label="Visualisation abstraite d'une preuve examinée par plusieurs nœuds"
     >
       <defs>
         <radialGradient id="ray-origin">

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { pageFiles, pageUrl } from "../../app/navigation";
 
 type AuthTab = "register" | "login";
 type StatusMessage = { kind: "info" | "error"; text: string };
@@ -112,10 +113,10 @@ export function ConnectionPage() {
   return (
     <div className="connection-page">
       <section className="connection-intro">
-        <p className="eyebrow">06 Créer un compte - Connexion</p>
-        <h1>Votre identité, sous votre contrôle.</h1>
-        <p>Pas d’e-mail, pas de mot de passe. Juste un pseudo.</p>
-        <div className="connection-proof"><span>Image de visage reçue</span><strong>0</strong><span>Votre image ne quitte pas cet appareil.</span></div>
+        <p className="eyebrow">Démonstration · Créer un compte / Se connecter</p>
+        <h1>Tester le parcours de connexion envisagé.</h1>
+        <p>Cette page illustre les écrans prévus. Aucun compte n’est créé et aucune authentification réelle n’est effectuée.</p>
+        <div className="connection-proof"><span>Vérifications biométriques réelles</span><strong>0</strong><span>Cette maquette ne traite ni ne transmet d’image.</span></div>
       </section>
 
       <section className="connection-card" aria-label="Parcours de connexion FaceIN">
@@ -148,7 +149,7 @@ export function ConnectionPage() {
               <li><span>3</span>Terminé</li>
             </ol>
             <h2>Créer votre compte</h2>
-            <p className="auth-description">Pas d’e-mail, pas de mot de passe. Juste un pseudo.</p>
+            <p className="auth-description">Le parcours visé associe un pseudo à une méthode biométrique traitée localement.</p>
             {!showCamera && (
               <form className="auth-form" onSubmit={submitForm}>
                 <label htmlFor="register-username">Pseudo</label>
@@ -169,7 +170,7 @@ export function ConnectionPage() {
                 <small id="username-help">3 à 24 caractères : lettres, chiffres, tiret ou souligné.</small>
                 <label className="consent-label">
                   <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} required />
-                  <span>J’accepte les <a href="index.html#legal-notice">CGV</a> et la <a href="comment-ca-marche.html#privacy">politique de confidentialité</a>.</span>
+                  <span>J’accepte les <a href={pageUrl(pageFiles.home, "legal-notice")}>CGV</a> et la <a href={pageUrl(pageFiles.howItWorks, "privacy")}>politique de confidentialité</a>.</span>
                 </label>
                 <button className="button button-primary button-full" type="submit">Continuer <span aria-hidden="true">→</span></button>
               </form>
@@ -182,8 +183,8 @@ export function ConnectionPage() {
                   <video ref={cameraRef} autoPlay muted playsInline aria-label="Aperçu local de la caméra" />
                   {!cameraActive && <span className="camera-placeholder">Aperçu caméra désactivé</span>}
                 </div>
-                <p className="privacy-callout">L’image ne quitte pas votre appareil. Elle est supprimée après le calcul.</p>
-                <p className="prototype-note">Dans cette maquette, aucun calcul n’a lieu et aucune image n’est envoyée ou enregistrée.</p>
+                <p className="privacy-callout">Objectif : traiter la capture localement et ne pas l’envoyer aux nœuds.</p>
+                <p className="prototype-note">Dans cette maquette, aucun calcul biométrique n’a lieu et aucune image n’est envoyée ou enregistrée.</p>
                 <div className="button-row">
                   {!cameraActive ? (
                     <button className="button button-primary" type="button" onClick={startCamera}>Activer l’aperçu caméra</button>
@@ -195,7 +196,7 @@ export function ConnectionPage() {
                     type="button"
                     onClick={() => stopCamera("Aucune inscription réelle n’est effectuée dans cette démonstration.")}
                   >
-                    Enregistrer mon visage
+                    Simuler l’enregistrement
                   </button>
                 </div>
               </div>
@@ -204,7 +205,7 @@ export function ConnectionPage() {
         ) : (
           <section id="login-panel" aria-label="Se connecter">
             <h2>Se connecter</h2>
-            <p className="auth-description">Saisissez votre pseudo, puis regardez la caméra.</p>
+            <p className="auth-description">Saisissez un pseudo de démonstration, puis simulez la capture.</p>
             {!showCamera && (
               <form className="auth-form" onSubmit={submitForm}>
                 <label htmlFor="login-username">Pseudo</label>
@@ -226,8 +227,8 @@ export function ConnectionPage() {
             )}
             {showCamera && (
               <div className="camera-demo">
-                <h3>Se connecter avec mon visage</h3>
-                <p>Placez votre visage dans le cadre et regardez la caméra.</p>
+                <h3>Simuler une connexion biométrique</h3>
+                <p>Placez votre visage dans le cadre pour illustrer l’étape de capture.</p>
                 <div className={`camera-frame${cameraActive ? " is-active" : ""}`}>
                   <video ref={cameraRef} autoPlay muted playsInline aria-label="Aperçu local de la caméra" />
                   {!cameraActive && <span className="camera-placeholder">Aperçu caméra désactivé</span>}
@@ -244,11 +245,11 @@ export function ConnectionPage() {
                     type="button"
                     onClick={() => setStatus({ kind: "info", text: "Aucune connexion réelle n’est effectuée dans cette démonstration." })}
                   >
-                    Se connecter avec mon visage
+                    Simuler la connexion
                   </button>
                 </div>
                 <div className="sample-error">
-                  <span className="sample-error__label">Exemple d’état de maquette</span>
+                  <span className="sample-error__label">État d’erreur illustratif</span>
                   <strong>Visage non reconnu</strong>
                   <p>Vérifiez l’éclairage et retirez ce qui couvre votre visage, puis réessayez.</p>
                   <button className="text-button" type="button" onClick={() => setStatus({ kind: "info", text: "Aucun contrôle biométrique n’est effectué dans cette maquette." })}>Réessayer</button>
@@ -259,15 +260,15 @@ export function ConnectionPage() {
               <button
                 className="account-help__action"
                 type="button"
-                onClick={() => setStatus({ kind: "info", text: "La révocation n’est pas disponible dans cette maquette." })}
+                onClick={() => setStatus({ kind: "info", text: "La révocation n’est pas implémentée dans cette maquette." })}
               >
-                Appareil perdu ? <strong>Révoquer mon identité</strong>
+                Appareil perdu ? <strong>Révocation à définir</strong>
               </button>
               <span>Pas encore de compte ? <button className="text-button" type="button" onClick={() => selectTab("register")}>Créer un compte</button></span>
               <div className="renewal-notice">
-                <strong>Votre photo de référence expire dans 12 jours</strong>
-                <p>Refaites votre inscription pour continuer à vous connecter.</p>
-                <button className="text-button" type="button" onClick={() => selectTab("register")}>Renouveler maintenant</button>
+                <strong>Renouvellement de l’enrôlement</strong>
+                <p>La durée de validité et la procédure de renouvellement restent à définir.</p>
+                <button className="text-button" type="button" onClick={() => selectTab("register")}>Revoir le parcours</button>
               </div>
             </div>
           </section>

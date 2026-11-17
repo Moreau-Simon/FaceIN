@@ -29,7 +29,26 @@ Pages servies :
 
 Le parcours d’inscription n’envoie aucune authentification. L’aperçu caméra ne démarre qu’après une action explicite, reste local et n’effectue aucune reconnaissance. Le guide d’intégration présente des exemples illustratifs non reliés à un SDK ou à un endpoint disponible dans ce dépôt. Les chiffres et tableaux d’interface sont également signalés comme illustratifs.
 
-Structure de l’application : `src/` contient les composants React et les pages; `styles/site.css` définit le design responsive; `index.html` et les quatre autres entrées HTML sont compilées dans `dist/`. Les fragments `accueil.js`, `connexion.js`, `comment-ca-marche.js`, `integrer.js` et `tarif.js` restent les références de contenu et ne sont pas des points d’entrée de l’application.
+## Architecture du code
+
+```text
+src/
+├── app/                  # composition, table des routes, URLs et navigation
+├── components/
+│   ├── layout/           # SiteShell, SiteHeader, SiteFooter
+│   ├── ui/               # composants réutilisables (BrandMark, Reveal, …)
+│   └── visuals/          # illustrations SVG et aperçu interactif
+├── features/
+│   ├── home/             # page d’accueil et ses maquettes dédiées
+│   ├── connection/       # parcours d’inscription / connexion
+│   ├── how-it-works/     # explication du fonctionnement prévu
+│   ├── integration/      # guide d’intégration
+│   └── pricing/          # offres et comparatif
+├── styles/site.css       # design system (tokens + @layer)
+└── main.tsx              # point d’entrée React
+```
+
+Le modèle multipage est conservé : `index.html` et les quatre autres entrées HTML sont compilées dans `dist/`. Les URLs internes et les libellés de navigation sont centralisés dans `src/app/navigation.ts`; la table des pages (titre + composant) dans `src/app/routes.ts`. Le design system reste dans une seule feuille CSS organisée en couches (`reset`, `base`, `layout`, `components`, `pages`, `responsive`).
 
 ## Environnement OpenCode — Frontend Premium
 

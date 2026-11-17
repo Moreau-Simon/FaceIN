@@ -10,7 +10,7 @@ Processus obligatoire suivi par `frontend-lead`. Ne jamais sauter de phase ; ne 
 | 4 | Architecture | architect, researcher | frontend-architecture | Entrée dans `DECISIONS.md` | Stack et structure décidées |
 | 5 | Direction artistique | ui-ux-designer | ui-ux-design-system | `DESIGN_SYSTEM.md` | Tokens et composants définis |
 | 6 | Développement | engineer | frontend-implementation | Code fonctionnel | Build/lint/tests OK, critères validés |
-| 7 | Animations | motion-specialist, webgl-specialist (si justifié) | advanced-web-animation, webgl-experience | Animations/3D intégrées | Perf mesurée, mouvement réduit OK |
+| 7 | Animations | motion-specialist, webgl-specialist (si justifié), animation-3d-specialist (si 3D lourde validée) | advanced-web-animation, webgl-experience, heavy-3d-animation (si justifié) | Animations/3D intégrées | Perf mesurée, mouvement réduit OK |
 | 8 | Contrôle qualité | qa-auditor, engineer (corrections) | frontend-quality-and-performance | `QUALITY_REPORT.md` | Aucun bloquant ouvert |
 | 9 | Livraison | lead | frontend-documentation | README, rapport final | Docs à jour, installation reproductible |
 

@@ -1,6 +1,6 @@
 # Règles du projet
 
-Ce dépôt utilise l'environnement OpenCode « Frontend Premium » : 1 agent principal (`frontend-lead`), 7 sous-agents, 9 skills (dans `.opencode/`).
+Ce dépôt utilise l'environnement OpenCode « Frontend Premium » : 1 agent principal (`frontend-lead`), 7 sous-agents, 10 skills (dans `.opencode/`, dont `heavy-3d-animation` pour l'animation 3D lourde).
 
 ## Langue
 Réponds et documente en français (code, identifiants et commits en anglais).

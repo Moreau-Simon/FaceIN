@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
+import { pageFiles } from "../../app/navigation";
 import { ExperienceWidgetVisual } from "./ExperienceWidgetVisual";
 
 const closeDuration = 280;
 
 const benefits = [
-  "Votre image reste sur votre appareil",
-  "Une preuve mathématique, jamais la photo",
-  "Une vérification indépendante",
+  "Biométrie traitée localement (cible)",
+  "Preuve cryptographique à construire",
+  "Vérification par un réseau de nœuds (cible)",
 ];
 
 export function ExperienceWidget() {
@@ -54,20 +55,6 @@ export function ExperienceWidget() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeModal();
-      }
-    };
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isOpen]);
 
   useEffect(() => () => {
@@ -118,11 +105,11 @@ export function ExperienceWidget() {
           <header className="experience-modal__intro">
             <div className="experience-modal__copy">
               <p className="experience-modal__eyebrow">FACEIN · IDENTITÉ NUMÉRIQUE</p>
-              <h2 id="experience-modal-title">Une preuve qui circule.<br />Votre image, jamais.</h2>
-              <p>Une expérience de connexion fluide, conçue pour vérifier votre identité sans exposer votre visage.</p>
+              <h2 id="experience-modal-title">Une preuve plutôt<br />qu’une image.</h2>
+              <p>Le parcours que FaceIN cherche à construire, sans faire de la biométrie brute le mécanisme central.</p>
               <div className="experience-modal__actions">
-                <a className="button button-primary" href="connexion.html#register">Créer mon identité <span aria-hidden="true">↗</span></a>
-                <a className="button experience-modal__secondary" href="comment-ca-marche.html">Comment ça marche</a>
+                <a className="button button-primary" href={pageFiles.connection}>Voir le parcours de démonstration <span aria-hidden="true">↗</span></a>
+                <a className="button experience-modal__secondary" href={pageFiles.howItWorks}>Voir le fonctionnement</a>
               </div>
             </div>
             <ul className="experience-benefits">
@@ -135,7 +122,7 @@ export function ExperienceWidget() {
             </ul>
           </header>
           <ExperienceWidgetVisual />
-          <p className="experience-modal__disclaimer">Démo visuelle uniquement : l’interface de paiement et les indicateurs ne déclenchent aucune transaction ni authentification.</p>
+          <p className="experience-modal__disclaimer">Démo visuelle uniquement : l’interface de paiement et les indicateurs ne déclenchent aucune transaction ni authentification. Les fonctions présentées restent à implémenter.</p>
         </section>
       </dialog>
     </>

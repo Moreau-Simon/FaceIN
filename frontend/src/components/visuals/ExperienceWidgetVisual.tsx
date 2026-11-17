@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { BrandMark } from "./BrandMark";
+import { BrandMark } from "../ui/BrandMark";
 
 const plans = {
-  standard: { label: "Standard", price: "Gratuit", vectors: "128 valeurs" },
-  reinforced: { label: "Renforcée", price: "2,99 € / mois", vectors: "256 valeurs" },
+  standard: { label: "Standard", price: "Gratuit · indicatif", verification: "niveau standard" },
+  reinforced: { label: "Renforcée", price: "2,99 € / mois · indicatif", verification: "niveau renforcé" },
 } as const;
 
 type PlanId = keyof typeof plans;
@@ -11,7 +11,7 @@ type PlanId = keyof typeof plans;
 const planOptions = [
   { id: "standard", ...plans.standard },
   { id: "reinforced", ...plans.reinforced },
-] satisfies { id: PlanId; label: string; price: string; vectors: string }[];
+] satisfies { id: PlanId; label: string; price: string; verification: string }[];
 
 function PlanSelector({
   selectedPlan,
@@ -56,11 +56,11 @@ function CheckoutPreview({
       <div className="experience-checkout__body">
         <p className="experience-checkout__eyebrow">ABONNEMENT PARTENAIRE</p>
         <h3>Choisissez votre formule</h3>
-        <p className="experience-checkout__description">Une expérience de connexion simple, avec FaceIN.</p>
+        <p className="experience-checkout__description">Un aperçu du parcours et des offres envisagés.</p>
         <PlanSelector selectedPlan={selectedPlan} onSelect={onSelect} />
         <div className="experience-checkout__summary">
           <div><span>Formule {plan.label}</span><strong>{plan.price}</strong></div>
-          <div><span>Preuve locale</span><strong>{plan.vectors}</strong></div>
+          <div><span>Niveau visé</span><strong>{plan.verification}</strong></div>
         </div>
         <div className="experience-payment-method">
           <span className="payment-card-icon" aria-hidden="true"><i /><i /></span>
@@ -101,15 +101,15 @@ export function ExperienceWidgetVisual() {
 
       <aside className="experience-metrics" aria-label="Indicateurs FaceIN illustratifs">
         <article className="experience-metric experience-metric--warm">
-          <span className="experience-metric__label">IMAGE TRANSMISE</span>
+          <span className="experience-metric__label">IMAGE BRUTE ENVOYÉE</span>
           <strong>0</strong>
-          <span className="experience-metric__caption">l’image reste sur l’appareil</span>
+          <span className="experience-metric__caption">objectif de conception</span>
           <span className="experience-metric__spark" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></span>
         </article>
         <article className="experience-metric experience-metric--cool">
-          <span className="experience-metric__label">PREUVE LOCALE</span>
-          <strong>{plan.vectors.split(" ")[0]}<small> valeurs</small></strong>
-          <span className="experience-metric__caption">formule {plan.label.toLowerCase()}</span>
+          <span className="experience-metric__label">NIVEAU VISÉ</span>
+          <strong>{plan.label}</strong>
+          <span className="experience-metric__caption">garanties à définir</span>
           <div className="experience-metric__progress" aria-hidden="true"><i /></div>
         </article>
         <p className="experience-metrics__note">Chiffres et interface présentés à titre illustratif.</p>

@@ -14,6 +14,7 @@
 | 5. Interactions | Navigation, formulaires de démo, aperçu caméra, copie, FAQ | Terminé |
 | 6. Animations | Micro-interactions et apparitions au scroll, mouvement réduit | Terminé |
 | 7. Qualité et livraison | Build, responsive, accessibilité, rapport et README | Terminé |
+| 8. Remplacement du modèle 3D | Créer un sceau d’identité 3D procédural, sans SVG au chargement ; respecter le mouvement réduit et le repli WebGL | Terminé |
 
 ## Tâches
 
@@ -28,6 +29,7 @@
 | motion | Implémenter les animations retenues et leur repli réduit | Spécialiste animation / Lead | pages, design | Nettoyage des effets; mouvement réduit testé | Terminé |
 | qa | Tester build, routes, formulaires, responsive, clavier, contraste, console | QA / Lead | pages, interactions, motion | Aucun bloquant; rapport avec preuves et limites | Terminé |
 | delivery | Documenter installation, scripts, architecture et risques | Documentation / Lead | qa | Installation reproductible et docs synchronisées | Terminé |
+| hero-3d | Remplacer le ruban par un sceau 3D procédural, sans SVG au chargement ; garder le chargement différé, le mode immobile, le message WebGL et la pause hors écran | Lead | research, motion | 12 draw calls max, moins de 30 000 triangles, sans débordement, build et métriques consignés | Terminé |
 
 ## Découpage technique proposé
 
