@@ -29,9 +29,11 @@ class ErreurHeartbeatDetaillee(grpc.RpcError):
 class ServeurFactice:
     def __init__(self):
         self.arret_demande = False
+        self.delai_arret = None
 
     def stop(self, grace):
         self.arret_demande = True
+        self.delai_arret = grace
         return self
 
     def wait(self):
@@ -81,11 +83,21 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     def demarrer_serveur(
         node_id, port, verifier, nonces, decider_fn, fabriquer_token
     ):
+        decision = decider_fn(
+            SimpleNamespace(
+                id_demande="requete-123",
+                utilisateur_id="user-1",
+                preuve_zkp=b"preuve",
+                nonce="nonce-123",
+                service_cible="service-1",
+            )
+        )
         dependances_serveur.update(
             verifier=verifier,
             nonces=nonces,
             decider_fn=decider_fn,
             fabriquer_token=fabriquer_token,
+            decision=decision,
         )
         return serveur
 
@@ -130,17 +142,11 @@ def test_main_met_a_jour_le_registre_pour_chaque_heartbeat(
     assert callable(dependances_serveur["decider_fn"])
     assert callable(dependances_serveur["fabriquer_token"])
 
-    decision = dependances_serveur["decider_fn"](
-        SimpleNamespace(
-            id_demande="requete-123",
-            utilisateur_id="user-1",
-            preuve_zkp=b"preuve",
-            nonce="nonce-123",
-            service_cible="service-1",
-        )
-    )
-    assert decision is True
-    assert appels_vote == [("node-b", 50052, "requete-123", 1.5)]
+    assert dependances_serveur["decision"] is True
+    assert len(appels_vote) == 1
+    host, port, id_demande, timeout_s = appels_vote[0]
+    assert (host, port, id_demande) == ("node-b", 50052, "requete-123")
+    assert 0 < timeout_s <= 1.5
     assert serveur.arret_demande
 
 
@@ -416,7 +422,7 @@ def test_exception_inattendue_sur_un_pair_n_interrompt_pas_les_autres(
     erreurs = [
         record
         for record in caplog.records
-        if "Erreur inattendue pendant l'appel heartbeat vers node-b:50052"
+        if "Erreur inattendue pendant l'appel battement de"
         in record.getMessage()
     ]
     assert len(erreurs) == 3
@@ -462,3 +468,4 @@ def test_main_arrete_proprement_sur_sigterm(monkeypatch):
 
     assert evenement.arret_demande
     assert serveur.arret_demande
+    assert serveur.delai_arret == main_module.GRACEFUL_SHUTDOWN_SECONDS

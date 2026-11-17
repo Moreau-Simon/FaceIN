@@ -119,6 +119,31 @@ def test_localhost_sur_un_autre_port_est_un_pair_valide(
     ]
 
 
+def test_adresse_ipv6_entre_crochets_est_un_pair_valide(
+    ecrire_yaml, monkeypatch
+):
+    ecrire_yaml(YAML_SANS_SEUIL)
+    monkeypatch.setenv("NODE_ID", "node-a")
+    monkeypatch.setenv("NODE_PORT", "50051")
+    monkeypatch.setenv("PEERS", "[2001:db8::2]:50062")
+
+    assert charger_configuration()["peers"] == [
+        {"host": "2001:db8::2", "port": 50062}
+    ]
+
+
+def test_adresse_ipv6_loopback_sur_son_propre_port_refuse(
+    ecrire_yaml, monkeypatch
+):
+    ecrire_yaml(YAML_SANS_SEUIL)
+    monkeypatch.setenv("NODE_ID", "node-a")
+    monkeypatch.setenv("NODE_PORT", "50061")
+    monkeypatch.setenv("PEERS", "[::1]:50061")
+
+    with pytest.raises(RuntimeError, match="propres pairs"):
+        charger_configuration()
+
+
 # ---------------------------------------------------------------------------
 # Seuil de majorité
 # ---------------------------------------------------------------------------

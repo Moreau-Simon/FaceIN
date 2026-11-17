@@ -8,7 +8,7 @@ import grpc
 import consensus_pb2_grpc
 import verification_pb2
 import verification_pb2_grpc
-from consensus.validation import decider, valider_avec_mock
+from consensus.validation import VoteExecutor, decider, valider_avec_mock
 from network.peer_client import demander_vote
 from network.server import ConsensusService, VerificationService
 from verification.nonces import NonceStore
@@ -18,6 +18,7 @@ class NoeudLocal:
     def __init__(self, node_id, pairs):
         self.node_id = node_id
         self.executor = ThreadPoolExecutor(max_workers=8)
+        self.vote_executor = VoteExecutor(max_workers=2, max_pending=2)
         self.server = grpc.server(self.executor)
         self.nonces = NonceStore()
         self.port = self.server.add_insecure_port("127.0.0.1:0")
@@ -39,6 +40,7 @@ class NoeudLocal:
                 interroger_pair,
                 seuil=2,
                 timeout_s=0.5,
+                vote_executor=self.vote_executor,
             )
 
         consensus_pb2_grpc.add_ConsensusServiceServicer_to_server(
@@ -59,6 +61,7 @@ class NoeudLocal:
     def arreter(self):
         self.server.stop(0).wait()
         self.executor.shutdown(wait=True)
+        self.vote_executor.close()
 
 
 def _demander_nonce_puis_verifier(host, port, utilisateur_id):

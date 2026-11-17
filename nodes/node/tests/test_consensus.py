@@ -6,15 +6,23 @@ from types import SimpleNamespace
 
 import grpc
 import pytest
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 
 import consensus_pb2
 import consensus_pb2_grpc
 import verification_pb2
-from consensus.validation import decider
+from consensus.validation import VoteExecutor, decider
 from network.peer_client import demander_vote
 import network.server as server_module
 from network.server import ConsensusService, VerificationService
 from verification.nonces import NonceStore
+
+
+@pytest.fixture
+def vote_executor():
+    executor = VoteExecutor(max_workers=2, max_pending=2)
+    yield executor
+    executor.close()
 
 
 def _interroger_vote(votes):
@@ -39,7 +47,7 @@ def _creer_demande(**overrides):
     return SimpleNamespace(**valeurs)
 
 
-def test_decider_compte_le_vote_local_et_les_votes_pour_des_pairs():
+def test_decider_compte_le_vote_local_et_les_votes_pour_des_pairs(vote_executor):
     demande = _creer_demande()
     votes = {"b": True, "c": False, "d": True}
 
@@ -50,12 +58,13 @@ def test_decider_compte_le_vote_local_et_les_votes_pour_des_pairs():
         interroger_pair=_interroger_vote(votes),
         seuil=2,
         timeout_s=1,
+        vote_executor=vote_executor,
     )
 
     assert resultat is True
 
 
-def test_decider_refuse_si_le_seuil_n_est_pas_atteint():
+def test_decider_refuse_si_le_seuil_n_est_pas_atteint(vote_executor):
     demande = _creer_demande()
     votes = {"b": False, "c": True}
 
@@ -66,12 +75,15 @@ def test_decider_refuse_si_le_seuil_n_est_pas_atteint():
         interroger_pair=_interroger_vote(votes),
         seuil=3,
         timeout_s=1,
+        vote_executor=vote_executor,
     )
 
     assert resultat is False
 
 
-def test_decider_exclut_les_pairs_en_erreur():
+def test_decider_journalise_les_erreurs_et_ne_compte_pas_les_pairs_en_erreur(
+    vote_executor, caplog
+):
     demande = _creer_demande()
     votes = {
         "b": RuntimeError("pair indisponible"),
@@ -85,12 +97,65 @@ def test_decider_exclut_les_pairs_en_erreur():
         interroger_pair=_interroger_vote(votes),
         seuil=2,
         timeout_s=1,
+        vote_executor=vote_executor,
     )
 
     assert resultat is False
+    assert "Erreur inattendue pendant le vote demandé à b" in caplog.text
+    assert "pair indisponible" in caplog.text
 
 
-def test_decider_ne_bloque_pas_sur_un_pair_qui_depasse_le_delai():
+@pytest.mark.parametrize(
+    "resultat, message",
+    [
+        (False, "Vote CONTRE reçu de b"),
+        (TimeoutError("timeout"), "Délai dépassé pour le vote demandé à b"),
+        (
+            grpc.StatusCode.DEADLINE_EXCEEDED,
+            "Délai gRPC dépassé pour le vote demandé à b",
+        ),
+        (
+            grpc.StatusCode.UNAVAILABLE,
+            "Échec gRPC du vote demandé à b",
+        ),
+    ],
+)
+def test_decider_distingue_refus_timeout_et_panne(
+    vote_executor, caplog, resultat, message
+):
+    caplog.set_level("DEBUG")
+
+    def interroger(pair, demande, timeout_s):
+        if isinstance(resultat, grpc.StatusCode):
+            class ErreurGrpcVote(grpc.RpcError):
+                def code(self):
+                    return resultat
+
+                def details(self):
+                    return "erreur de test"
+
+            raise ErreurGrpcVote()
+        if isinstance(resultat, Exception):
+            raise resultat
+        return resultat
+
+    decision = decider(
+        _creer_demande(),
+        ["b"],
+        verifier_local=lambda *args: False,
+        interroger_pair=interroger,
+        seuil=1,
+        timeout_s=1,
+        vote_executor=vote_executor,
+    )
+
+    assert decision is False
+    assert message in caplog.text
+
+
+def test_decider_ne_bloque_pas_sur_un_pair_qui_depasse_le_delai(
+    vote_executor, caplog
+):
     demande = _creer_demande()
     liberation_pair = Event()
 
@@ -106,11 +171,35 @@ def test_decider_ne_bloque_pas_sur_un_pair_qui_depasse_le_delai():
             interroger_pair=interroger,
             seuil=1,
             timeout_s=0.01,
+            vote_executor=vote_executor,
         )
     finally:
         liberation_pair.set()
 
     assert resultat is False
+    assert "Délai global du consensus dépassé" in caplog.text
+
+
+def test_vote_executor_borne_le_nombre_de_taches_soumises():
+    vote_executor = VoteExecutor(max_workers=1, max_pending=0)
+    liberation = Event()
+    demarre = Event()
+
+    def tache():
+        demarre.set()
+        liberation.wait()
+
+    try:
+        futur = vote_executor.submit(tache, timeout_s=1)
+        assert futur is not None
+        assert demarre.wait(timeout=1)
+        assert vote_executor.submit(lambda: None, timeout_s=0) is None
+
+        liberation.set()
+        futur.result(timeout=1)
+    finally:
+        liberation.set()
+        vote_executor.close()
 
 
 @pytest.mark.parametrize(
@@ -225,16 +314,26 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
         def add_insecure_port(self, adresse):
             return 50051
 
+        def add_secure_port(self, adresse, credentials):
+            return 50051
+
         def start(self):
             return None
 
     serveur = ServeurFactice()
+    monkeypatch.setattr(
+        server_module, "charger_credentials_serveur", lambda: object()
+    )
     services_enregistres = {}
     nonces = NonceStore()
     decider_fn = lambda demande: True
     fabriquer_token = lambda utilisateur_id: "token-test"
 
-    monkeypatch.setattr(server_module.grpc, "server", lambda executor: serveur)
+    monkeypatch.setattr(
+        server_module.grpc,
+        "server",
+        lambda executor, options: serveur,
+    )
     monkeypatch.setattr(
         server_module.sync_pb2_grpc,
         "add_SyncServiceServicer_to_server",
@@ -253,6 +352,11 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
         lambda service, serveur: services_enregistres.update(
             verification=service
         ),
+    )
+    monkeypatch.setattr(
+        health_pb2_grpc,
+        "add_HealthServicer_to_server",
+        lambda service, serveur: services_enregistres.update(health=service),
     )
 
     resultat = server_module.start_grpc_server(
@@ -274,3 +378,6 @@ def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
         services_enregistres["verification"]._fabriquer_token
         is fabriquer_token
     )
+    assert services_enregistres["health"].Check(
+        health_pb2.HealthCheckRequest(), None
+    ).status == health_pb2.HealthCheckResponse.SERVING

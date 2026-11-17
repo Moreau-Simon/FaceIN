@@ -17,10 +17,12 @@ if BASE_DIR not in sys.path:
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from routes.authenticate import router as authenticate_router  # noqa: E402
 from routes.nonce import router as nonce_router  # noqa: E402
 from routes.register import router as register_router  # noqa: E402
+from services.grpc_bridge import fermer_canaux  # noqa: E402
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -46,11 +48,14 @@ BANNER = r"""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Cycle de vie de l'application FastAPI : affiche la bannière au démarrage."""
-    print(BANNER)
-    logger.info("Passerelle API FaceIn démarrée avec succès.")
-    yield
-    logger.info("Arrêt de la passerelle API FaceIn.")
+    """Journalise le démarrage et l'arrêt de l'API."""
+    logger.info("%s", BANNER)
+    logger.info("Passerelle API FaceIn démarrée.")
+    try:
+        yield
+    finally:
+        fermer_canaux()
+        logger.info("Arrêt de la passerelle API FaceIn.")
 
 
 # Initialisation de l'application FastAPI
@@ -76,7 +81,6 @@ app.include_router(nonce_router, prefix="/api", tags=["Nonce"])
 app.include_router(authenticate_router, prefix="/api", tags=["Authentification"])
 
 
-@app.get("/", tags=["Statut"])
 @app.get("/api/health", tags=["Statut"])
 def health_check():
     """Endpoint de contrôle de l'état de santé du service."""
@@ -85,6 +89,19 @@ def health_check():
         "service": "FaceIn API Gateway",
         "version": "1.0.0",
     }
+
+
+# Service du frontend de démonstration partenaire (port 8000 unifié)
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+PARTNER_DEMO_DIR = os.path.join(PROJECT_ROOT, "partner-demo")
+
+if os.path.isdir(PARTNER_DEMO_DIR):
+    app.mount("/demo", StaticFiles(directory=PARTNER_DEMO_DIR, html=True), name="partner-demo-alias")
+    app.mount("/", StaticFiles(directory=PARTNER_DEMO_DIR, html=True), name="partner-demo")
+else:
+    @app.get("/", tags=["Statut"])
+    def root_status():
+        return health_check()
 
 
 if __name__ == "__main__":

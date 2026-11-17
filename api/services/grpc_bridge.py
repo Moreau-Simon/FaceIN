@@ -11,6 +11,7 @@ import os
 import json
 import time
 from pathlib import Path
+from threading import Lock
 from typing import Any, Optional
 
 # ==============================================================================
@@ -58,28 +59,61 @@ DEFAULT_NODES = [
 
 SEUIL_MAJORITE = 2  # Au moins 2 noeuds sur 3 doivent valider la preuve
 TIMEOUT_NOEUD_SECONDES = 3.0
+GRPC_CHANNEL_OPTIONS = (
+    ("grpc.keepalive_time_ms", 300_000),
+    ("grpc.keepalive_timeout_ms", 20_000),
+    ("grpc.keepalive_permit_without_calls", 1),
+)
+
+_canaux: dict[str, Any] = {}
+_verrou_canaux = Lock()
 
 
 def _creer_canal(target: str):
-    """Crée un canal gRPC en TLS mutuel lorsque TLS est activé."""
-    tls_enabled = os.getenv("TLS_ENABLED", "false").strip().lower()
-    if tls_enabled not in {"1", "true", "yes", "on"}:
-        return grpc.insecure_channel(target)
+    """Retourne le canal gRPC partagé pour cette cible."""
+    with _verrou_canaux:
+        channel = _canaux.get(target)
+        if channel is not None:
+            return channel
 
-    ca_path = os.getenv("TLS_CA_CERT", "/app/certs/ca.crt")
-    cert_path = os.getenv("TLS_CERT")
-    key_path = os.getenv("TLS_KEY")
-    if not cert_path or not key_path:
-        raise RuntimeError(
-            "TLS_CERT et TLS_KEY doivent être configurés quand TLS_ENABLED=true"
-        )
+        tls_enabled = os.getenv("TLS_ENABLED", "true").strip().lower()
+        if tls_enabled not in {"1", "true", "yes", "on"}:
+            channel = grpc.insecure_channel(
+                target,
+                options=GRPC_CHANNEL_OPTIONS,
+            )
+        else:
+            ca_path = os.getenv("TLS_CA_CERT", "/app/certs/ca.crt")
+            cert_path = os.getenv("TLS_CERT")
+            key_path = os.getenv("TLS_KEY")
+            if not cert_path or not key_path:
+                raise RuntimeError(
+                    "TLS_CERT et TLS_KEY doivent être configurés "
+                    "quand TLS_ENABLED=true"
+                )
 
-    credentials = grpc.ssl_channel_credentials(
-        root_certificates=Path(ca_path).read_bytes(),
-        private_key=Path(key_path).read_bytes(),
-        certificate_chain=Path(cert_path).read_bytes(),
-    )
-    return grpc.secure_channel(target, credentials)
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=Path(ca_path).read_bytes(),
+                private_key=Path(key_path).read_bytes(),
+                certificate_chain=Path(cert_path).read_bytes(),
+            )
+            channel = grpc.secure_channel(
+                target,
+                credentials,
+                options=GRPC_CHANNEL_OPTIONS,
+            )
+
+        _canaux[target] = channel
+        return channel
+
+
+def fermer_canaux() -> None:
+    """Ferme et oublie les canaux gRPC partagés."""
+    with _verrou_canaux:
+        channels = tuple(_canaux.values())
+        _canaux.clear()
+    for channel in channels:
+        channel.close()
 
 
 def _verifier_noeud_unitaire(
@@ -131,7 +165,6 @@ def _verifier_noeud_unitaire(
         )
 
         reponse = stub.VerifierPreuve(demande, timeout=TIMEOUT_NOEUD_SECONDES)
-        channel.close()
 
         logger.info(
             "[%s] Réponse reçue du noeud initiateur : accepte=%s, raison='%s', token_present=%s",
@@ -312,7 +345,6 @@ def request_nonce_from_node(
 
             demande = verification_pb2.DemandeNonce(utilisateur_id=user_id)
             reponse = stub.DemanderNonce(demande, timeout=TIMEOUT_NOEUD_SECONDES)
-            channel.close()
 
             if reponse and reponse.nonce:
                 # Normalisation du timestamp d'expiration en secondes

@@ -4,12 +4,13 @@ Exécutable avec pytest ou python3 -m unittest.
 """
 
 import json
+import asyncio
 import os
 import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 # Ajout du répertoire api au path pour les imports directs
@@ -52,6 +53,7 @@ except ImportError:
     sys.modules["pydantic"] = mock_pydantic
 
 from services import grpc_bridge, store, zkp_verifier  # noqa: E402
+import api.main as api_main  # noqa: E402
 
 
 
@@ -139,6 +141,12 @@ class TestZkpVerifier(unittest.TestCase):
 class TestGrpcBridge(unittest.TestCase):
     """Tests du pont client gRPC et du consensus."""
 
+    def setUp(self):
+        grpc_bridge.fermer_canaux()
+
+    def tearDown(self):
+        grpc_bridge.fermer_canaux()
+
     def test_verify_on_nodes_fallback_mock(self):
         # Lorsque les serveurs gRPC ne sont pas démarrés, verify_on_nodes doit gérer
         # l'absence de réseau avec le mode de test initial sans crasher.
@@ -158,6 +166,26 @@ class TestGrpcBridge(unittest.TestCase):
         nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
         self.assertIsNone(nonce)
         self.assertIsNone(exp)
+
+    def test_api_lifespan_ferme_les_canaux_partages(self):
+        async def arreter_api():
+            async with api_main.lifespan(api_main.app):
+                pass
+
+        channel = Mock()
+        with patch.dict(os.environ, {"TLS_ENABLED": "false"}), patch.object(
+            grpc_bridge.grpc,
+            "insecure_channel",
+            return_value=channel,
+        ) as insecure_channel:
+            grpc_bridge._creer_canal("unused-target:50051")
+            asyncio.run(arreter_api())
+
+        insecure_channel.assert_called_once_with(
+            "unused-target:50051",
+            options=grpc_bridge.GRPC_CHANNEL_OPTIONS,
+        )
+        channel.close.assert_called_once_with()
 
     def test_api_uses_mutual_tls_for_nonce_and_verification(self):
         with tempfile.TemporaryDirectory() as cert_dir:
@@ -195,7 +223,7 @@ class TestGrpcBridge(unittest.TestCase):
                     return responses.pop(0)
 
             credentials = object()
-            channel = SimpleNamespace(close=lambda: None)
+            channel = SimpleNamespace(close=Mock())
             with patch.dict(
                 os.environ, {**paths, "TLS_ENABLED": "true"}, clear=False
             ), patch.object(
@@ -224,12 +252,12 @@ class TestGrpcBridge(unittest.TestCase):
 
             self.assertTrue(result["consensus"])
             self.assertEqual((nonce, expiration), ("nonce-123", 123456))
-            self.assertEqual(secure_channel.call_count, 2)
+            self.assertEqual(secure_channel.call_count, 1)
             self.assertEqual(
                 [call.args[0] for call in secure_channel.call_args_list],
-                ["node-a:50051", "node-a:50051"],
+                ["node-a:50051"],
             )
-            self.assertEqual(ssl_credentials.call_count, 2)
+            self.assertEqual(ssl_credentials.call_count, 1)
             self.assertEqual(
                 ssl_credentials.call_args.kwargs,
                 {
@@ -238,6 +266,12 @@ class TestGrpcBridge(unittest.TestCase):
                     "certificate_chain": b"api certificate",
                 },
             )
+            self.assertEqual(
+                secure_channel.call_args.kwargs["options"],
+                grpc_bridge.GRPC_CHANNEL_OPTIONS,
+            )
+            grpc_bridge.fermer_canaux()
+            channel.close.assert_called_once_with()
 
 
 class TestJwtManager(unittest.TestCase):
