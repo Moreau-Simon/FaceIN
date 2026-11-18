@@ -176,7 +176,10 @@ def verifier_preuve(
 
     Args:
         preuve_zkp_json: JSON ou dictionnaire de la preuve Groth16 (pi_a, pi_b, pi_c).
-        public_signals: Liste ou JSON des signaux publics [engagementAttendu, seuilMax].
+        public_signals: Liste ou JSON des 4 signaux publics :
+            [engagementAttendu, seuilMax, nonceHi, nonceLo].
+            nonceHi et nonceLo sont les moitiés haute/basse du nonce 256 bits,
+            ce qui lie cryptographiquement la preuve à cette session d'authentification.
         verification_key_path: Chemin vers le fichier verification_key.json.
 
     Returns:
@@ -353,17 +356,17 @@ class VerificateurZKP:
 
         # 2. Engagement de référence de l'utilisateur
         engagement = self.store.get(utilisateur_id)
-        nouvel_engagement = False
         if engagement is None:
-            if not public_signals:
-                logger.warning(
-                    "Vérification refusée : engagement introuvable pour %s.",
-                    utilisateur_id,
-                )
-                return False
-            # Synchronisation depuis les signaux publics (flux API)
-            engagement = public_signals[0]
-            nouvel_engagement = True
+            # L'engagement doit être enregistré lors du processus d'inscription
+            # (register). Il ne peut PAS être appris depuis les signaux publics
+            # d'une preuve d'authentification : cela permettrait à n'importe qui
+            # de forger un engagement valide au moment de la vérification.
+            logger.warning(
+                "Vérification refusée : engagement introuvable pour %s. "
+                "L'utilisateur doit s'inscrire (register) avant de s'authentifier.",
+                utilisateur_id,
+            )
+            return False
 
         if not public_signals:
             public_signals = [engagement]
@@ -377,16 +380,15 @@ class VerificateurZKP:
             return False
 
         # 3. Vérification cryptographique (snarkjs)
+        # Les 4 signaux publics attendus (ordre strict) :
+        #   [0] engagementAttendu   — Poseidon hash du vecteur de référence
+        #   [1] seuilMax            — Distance maximale tolérée
+        #   [2] nonceHi             — 128 bits de poids fort du nonce (nonce >> 128)
+        #   [3] nonceLo             — 128 bits de poids faible du nonce (nonce & mask)
+        # nonceHi et nonceLo lient cryptographiquement la preuve à ce challenge.
         if not verifier_preuve(preuve, public_signals, self._verification_key_path):
             return False
 
-        # L'engagement n'est mémorisé qu'une fois la preuve validée
-        if nouvel_engagement:
-            self.store.save(utilisateur_id, engagement)
-            logger.info(
-                "Engagement de %s synchronisé depuis les signaux publics.",
-                utilisateur_id,
-            )
         return True
 
 

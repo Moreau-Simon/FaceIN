@@ -12,50 +12,28 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from fastapi import HTTPException
 
-# Ajout du répertoire api au path pour les imports directs
+# Ajout du répertoire api et nodes/node au path pour les imports directs
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 API_DIR = os.path.dirname(CURRENT_DIR)
+NODES_DIR = os.path.join(os.path.dirname(API_DIR), "nodes", "node")
 if API_DIR not in sys.path:
     sys.path.insert(0, API_DIR)
+if NODES_DIR not in sys.path:
+    sys.path.insert(0, NODES_DIR)
 
-# Simulation de fastapi et pydantic si exécuté hors conteneur (ex: environnement hôte sans pip)
-try:
-    import fastapi
-    import pydantic
-except ImportError:
-    from unittest.mock import MagicMock
-
-    class _MockRouter:
-        def post(self, *args, **kwargs):
-            return lambda fn: fn
-
-        def get(self, *args, **kwargs):
-            return lambda fn: fn
-
-    mock_fastapi = MagicMock()
-    mock_fastapi.APIRouter = _MockRouter
-    mock_pydantic = MagicMock()
-
-    class _BaseModel:
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
-
-    def _field(*args, **kwargs):
-        return None
-
-    mock_pydantic.BaseModel = _BaseModel
-    mock_pydantic.Field = _field
-
-    sys.modules["fastapi"] = mock_fastapi
-    sys.modules["fastapi.middleware.cors"] = MagicMock()
-    sys.modules["pydantic"] = mock_pydantic
-
-from services import grpc_bridge, store, zkp_verifier  # noqa: E402
+from models import (  # noqa: E402
+    BN254_FIELD_ORDER,
+    AuthenticateRequest,
+    AuthenticateResponse,
+    RegisterRequest,
+    RegisterResponse,
+    validate_bn254_element,
+    validate_user_id_format,
+)
+from services import grpc_bridge, rate_limiter, store, zkp_verifier  # noqa: E402
 import api.main as api_main  # noqa: E402
-
-
 
 
 class TestStoreService(unittest.TestCase):
@@ -70,7 +48,7 @@ class TestStoreService(unittest.TestCase):
 
     def test_save_and_get_commitment(self):
         user_id = "alice"
-        commitment = "0x123456789abcdef"
+        commitment = "12345678901234567890"
 
         self.assertIsNone(self.storage.get_engagement(user_id))
 
@@ -83,15 +61,15 @@ class TestStoreService(unittest.TestCase):
     def test_save_commitment_replaces_previous_commitment(self):
         user_id = "bob"
 
-        self.storage.save_engagement(user_id, "0xold")
-        self.storage.save_engagement(user_id, "0xabc123")
+        self.storage.save_engagement(user_id, "1111111111")
+        self.storage.save_engagement(user_id, "2222222222")
 
         engagement = self.storage.get_engagement(user_id)
-        self.assertEqual(engagement["commitment"], "0xabc123")
+        self.assertEqual(engagement["commitment"], "2222222222")
 
     def test_nonce_lifecycle_and_single_use(self):
         user_id = "charlie"
-        nonce = "test-nonce-12345"
+        nonce = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         expires_at = time.time() + 60.0
 
         self.storage.save_nonce(nonce, user_id, expires_at)
@@ -112,7 +90,6 @@ class TestStoreService(unittest.TestCase):
         self.assertFalse(self.storage.consume_nonce(nonce, user_id))
 
 
-
 class TestZkpVerifier(unittest.TestCase):
     """Tests du module de vérification ZKP."""
 
@@ -121,7 +98,7 @@ class TestZkpVerifier(unittest.TestCase):
         try:
             result = zkp_verifier.verify_proof(
                 proof={"pi_a": []},
-                public_signals=["0x123", "1000"],
+                public_signals=["123", "1000"],
             )
             self.assertTrue(result)
         finally:
@@ -131,7 +108,7 @@ class TestZkpVerifier(unittest.TestCase):
         os.environ.pop("MOCK_ZKP_VERIFICATION", None)
         result = zkp_verifier.verify_proof(
             proof={"pi_a": []},
-            public_signals=["0x123"],
+            public_signals=["123"],
             verification_key_path="/non/existent/path/verification_key.json",
         )
         self.assertFalse(result)
@@ -147,12 +124,10 @@ class TestGrpcBridge(unittest.TestCase):
         grpc_bridge.fermer_canaux()
 
     def test_verify_on_nodes_fallback_mock(self):
-        # Lorsque les serveurs gRPC ne sont pas démarrés, verify_on_nodes doit gérer
-        # l'absence de réseau avec le mode de test initial sans crasher.
         result = grpc_bridge.verify_on_nodes(
             user_id="alice",
             proof_json_str=json.dumps({"test": True}),
-            nonce="nonce-123",
+            nonce="0123456789abcdef0123456789abcdef",
         )
         self.assertIn("consensus", result)
         self.assertIn("votes", result)
@@ -161,7 +136,6 @@ class TestGrpcBridge(unittest.TestCase):
         self.assertEqual(len(result["votes"]), 3)
 
     def test_request_nonce_from_node_fallback(self):
-        # En l'absence de noeuds gRPC actifs, request_nonce_from_node retourne (None, None)
         nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
         self.assertIsNone(nonce)
         self.assertIsNone(exp)
@@ -172,15 +146,18 @@ class TestGrpcBridge(unittest.TestCase):
                 pass
 
         channel = Mock()
+        mock_grpc = grpc_bridge.grpc or Mock()
+        mock_grpc.insecure_channel = Mock(return_value=channel)
+        mock_grpc.ssl_channel_credentials = Mock()
+        mock_grpc.secure_channel = Mock(return_value=channel)
+
         with patch.dict(os.environ, {"TLS_ENABLED": "false"}), patch.object(
-            grpc_bridge.grpc,
-            "insecure_channel",
-            return_value=channel,
-        ) as insecure_channel:
+            grpc_bridge, "grpc", mock_grpc
+        ):
             grpc_bridge._creer_canal("unused-target:50051")
             asyncio.run(arreter_api())
 
-        insecure_channel.assert_called_once_with(
+        mock_grpc.insecure_channel.assert_called_once_with(
             "unused-target:50051",
             options=grpc_bridge.GRPC_CHANNEL_OPTIONS,
         )
@@ -223,25 +200,24 @@ class TestGrpcBridge(unittest.TestCase):
 
             credentials = object()
             channel = SimpleNamespace(close=Mock())
+            mock_grpc = Mock()
+            mock_grpc.ssl_channel_credentials = Mock(return_value=credentials)
+            mock_grpc.secure_channel = Mock(return_value=channel)
+            mock_stub = Mock(return_value=VerificationStub(channel))
+
             with patch.dict(
                 os.environ, {**paths, "TLS_ENABLED": "true"}, clear=False
+            ), patch.object(grpc_bridge, "grpc", mock_grpc), patch.object(
+                grpc_bridge, "verification_pb2", SimpleNamespace(DemandeVerification=Mock(return_value=Mock())),
             ), patch.object(
-                grpc_bridge.grpc,
-                "ssl_channel_credentials",
-                return_value=credentials,
-            ) as ssl_credentials, patch.object(
-                grpc_bridge.grpc,
-                "secure_channel",
-                return_value=channel,
-            ) as secure_channel, patch.object(
-                grpc_bridge.verification_pb2_grpc,
-                "VerificationServiceStub",
-                VerificationStub,
+                grpc_bridge,
+                "verification_pb2_grpc",
+                SimpleNamespace(VerificationServiceStub=mock_stub),
             ):
                 result = grpc_bridge.verify_on_nodes(
                     "alice",
                     json.dumps({"proof": "test"}),
-                    "nonce-123",
+                    "0123456789abcdef0123456789abcdef",
                     nodes=[{"id": "node-a", "host": "node-a", "port": 50051}],
                 )
                 nonce, expiration = grpc_bridge.request_nonce_from_node(
@@ -251,14 +227,14 @@ class TestGrpcBridge(unittest.TestCase):
 
             self.assertTrue(result["consensus"])
             self.assertEqual((nonce, expiration), ("nonce-123", 123456))
-            self.assertEqual(secure_channel.call_count, 1)
+            self.assertEqual(mock_grpc.secure_channel.call_count, 1)
             self.assertEqual(
-                [call.args[0] for call in secure_channel.call_args_list],
+                [call.args[0] for call in mock_grpc.secure_channel.call_args_list],
                 ["node-a:50051"],
             )
-            self.assertEqual(ssl_credentials.call_count, 1)
+            self.assertEqual(mock_grpc.ssl_channel_credentials.call_count, 1)
             self.assertEqual(
-                ssl_credentials.call_args.kwargs,
+                mock_grpc.ssl_channel_credentials.call_args.kwargs,
                 {
                     "root_certificates": b"ca",
                     "private_key": b"api private key",
@@ -266,7 +242,7 @@ class TestGrpcBridge(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                secure_channel.call_args.kwargs["options"],
+                mock_grpc.secure_channel.call_args.kwargs["options"],
                 grpc_bridge.GRPC_CHANNEL_OPTIONS,
             )
             grpc_bridge.fermer_canaux()
@@ -277,10 +253,9 @@ class TestJwtManager(unittest.TestCase):
     """Tests pour le gestionnaire de tokens JWT."""
 
     def test_jwt_generation_and_verification_mocked(self):
-        from unittest.mock import MagicMock
         from services import jwt_manager
 
-        mock_jwt = MagicMock()
+        mock_jwt = Mock()
         mock_jwt.encode.return_value = "eyJfake.jwt.token"
         mock_jwt.decode.return_value = {"user_id": "alice", "exp": 9999999999}
         original_jwt = jwt_manager.jwt
@@ -297,101 +272,95 @@ class TestJwtManager(unittest.TestCase):
 
 
 class TestAuthenticateLogic(unittest.TestCase):
-    """Tests des 6 étapes d'authentification de la route authenticate."""
+    """Tests du flux d'authentification biométrique ZKP (architecture PROMPT 2)."""
 
-    
     def setUp(self):
         store.reset_store()
         self.storage = store.get_store()
+        rate_limiter.reset_rate_limiter()
+        self.valid_nonce = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
     def tearDown(self):
         store.reset_store()
+        rate_limiter.reset_rate_limiter()
 
+    def test_auth_step1_malformed_nonce_rejected(self):
+        from routes.authenticate import authenticate
 
-    def test_auth_step1_invalid_nonce(self):
-        from routes.authenticate import authenticate, AuthenticateRequest
-
+        # Nonce trop court (32 chars au lieu de 64 chars / 256 bits)
         req = AuthenticateRequest(
             user_id="user1",
-            proof={"a": "b"},
-            public_signals=["0xcomm"],
-            nonce="invalid-nonce"
+            proof={"pi_a": [], "pi_b": [], "pi_c": []},
+            public_signals=["123456789"],
+            nonce="0123456789abcdef0123456789abcdef",
         )
         res = authenticate(req)
         self.assertFalse(res.authenticated)
-        self.assertEqual(res.reason, "Nonce invalide ou expiré")
+        self.assertFalse(res.success)
+        self.assertEqual(res.reason, "Nonce malformé (attendu : 64 caractères hexadécimaux)")
+        self.assertEqual(res.raison_refus, "Nonce malformé")
 
-    def test_auth_step2_user_not_found(self):
-        from routes.authenticate import authenticate, AuthenticateRequest
+    def test_auth_step2_zkp_failure(self):
+        from routes.authenticate import authenticate
 
-        nonce = "nonce-valid-step2"
-        self.storage.save_nonce(nonce, "user_unknown", time.time() + 60)
-
-        req = AuthenticateRequest(
-            user_id="user_unknown",
-            proof={"a": "b"},
-            public_signals=["0xcomm"],
-            nonce=nonce
-        )
-        res = authenticate(req)
-        self.assertFalse(res.authenticated)
-        self.assertEqual(res.reason, "Utilisateur non trouvé ou engagement absent")
-
-    def test_auth_step3_mismatched_commitment(self):
-        from routes.authenticate import authenticate, AuthenticateRequest
-
-        user_id = "user_step3"
-        nonce = "nonce-step3"
-        self.storage.save_engagement(user_id, "0xexpected_commitment")
-        self.storage.save_nonce(nonce, user_id, time.time() + 60)
-
-        req = AuthenticateRequest(
-            user_id=user_id,
-            proof={"a": "b"},
-            public_signals=["0xdifferent_commitment"],
-            nonce=nonce
-        )
-        res = authenticate(req)
-        self.assertFalse(res.authenticated)
-        self.assertEqual(res.reason, "L'engagement public ne correspond pas à l'engagement enregistré")
-
-    def test_auth_step4_zkp_failure(self):
-        from routes.authenticate import authenticate, AuthenticateRequest
-
-        user_id = "user_step4"
-        nonce = "nonce-step4"
-        commitment = "0xmatch"
-        self.storage.save_engagement(user_id, commitment)
-        self.storage.save_nonce(nonce, user_id, time.time() + 60)
+        user_id = "user_step2"
+        commitment = "123456789"
 
         # Désactiver le mock ZKP pour forcer le rejet (fichier introuvable ou preuve invalide)
         os.environ.pop("MOCK_ZKP_VERIFICATION", None)
 
         req = AuthenticateRequest(
             user_id=user_id,
-            proof={"a": "b"},
+            proof={"pi_a": [], "pi_b": [], "pi_c": []},
             public_signals=[commitment],
-            nonce=nonce
+            nonce=self.valid_nonce,
         )
         res = authenticate(req)
         self.assertFalse(res.authenticated)
+        self.assertFalse(res.success)
         self.assertEqual(res.reason, "Échec de la vérification locale de la preuve ZKP")
 
-    def test_auth_step6_success(self):
-        from unittest.mock import MagicMock
-        from routes.authenticate import authenticate, AuthenticateRequest
-        from services import jwt_manager
+    def test_auth_step3_consensus_failure(self):
+        from routes.authenticate import authenticate
 
-        user_id = "user_step6"
-        nonce = "nonce-step6"
-        commitment = "0xcorrect_commitment"
-        self.storage.save_engagement(user_id, commitment)
-        self.storage.save_nonce(nonce, user_id, time.time() + 60)
+        user_id = "user_step3"
+        commitment = "123456789"
 
         # Activer le mock ZKP
         os.environ["MOCK_ZKP_VERIFICATION"] = "true"
 
-        mock_jwt = MagicMock()
+        # Simuler un refus de consensus gRPC (ex: nonce déjà consommé sur les nœuds)
+        with patch(
+            "routes.authenticate.verify_on_nodes",
+            return_value={
+                "consensus": False,
+                "majority": "0/3",
+                "reason": "nonce invalide ou expiré",
+            },
+        ):
+            req = AuthenticateRequest(
+                user_id=user_id,
+                proof={"pi_a": [], "pi_b": [], "pi_c": []},
+                public_signals=[commitment],
+                nonce=self.valid_nonce,
+            )
+            res = authenticate(req)
+            self.assertFalse(res.authenticated)
+            self.assertFalse(res.success)
+            self.assertEqual(res.reason, "Consensus non atteint par le réseau de pairs")
+            self.assertEqual(res.raison_refus, "nonce invalide ou expiré")
+
+    def test_auth_success(self):
+        from routes.authenticate import authenticate
+        from services import jwt_manager
+
+        user_id = "user_success"
+        commitment = "123456789"
+
+        # Activer le mock ZKP
+        os.environ["MOCK_ZKP_VERIFICATION"] = "true"
+
+        mock_jwt = Mock()
         mock_jwt.encode.return_value = "eyJheader.payload.signature"
         original_jwt = jwt_manager.jwt
         jwt_manager.jwt = mock_jwt
@@ -399,17 +368,36 @@ class TestAuthenticateLogic(unittest.TestCase):
         try:
             req = AuthenticateRequest(
                 user_id=user_id,
-                proof={"pi_a": []},
+                proof={"pi_a": [], "pi_b": [], "pi_c": []},
                 public_signals=[commitment],
-                nonce=nonce
+                nonce=self.valid_nonce,
             )
             res = authenticate(req)
             self.assertTrue(res.authenticated)
+            self.assertTrue(res.success)
             self.assertEqual(res.token, "eyJheader.payload.signature")
             self.assertIsNone(res.reason)
+            self.assertEqual(res.message, "Authentification réussie")
         finally:
             jwt_manager.jwt = original_jwt
             os.environ.pop("MOCK_ZKP_VERIFICATION", None)
+
+    def test_auth_frontend_contract_compliance(self):
+        from routes.authenticate import authenticate
+
+        user_id = "user_contract"
+        req = AuthenticateRequest(
+            user_id=user_id,
+            proof={"pi_a": [], "pi_b": [], "pi_c": []},
+            public_signals=["123456"],
+            nonce=self.valid_nonce,
+        )
+        res = authenticate(req)
+        # Le frontend teste authResult.raison_refus || authResult.message
+        self.assertIsNotNone(res.raison_refus)
+        self.assertIsNotNone(res.message)
+        self.assertIn("success", res.model_dump())
+        self.assertIn("authenticated", res.model_dump())
 
 
 class TestRegisterAndNonceRoutes(unittest.TestCase):
@@ -418,40 +406,186 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
     def setUp(self):
         store.reset_store()
         self.storage = store.get_store()
+        rate_limiter.reset_rate_limiter()
 
     def tearDown(self):
         store.reset_store()
+        rate_limiter.reset_rate_limiter()
 
     def test_register_success(self):
-        from routes.register import register, RegisterRequest
+        from routes.register import register
 
-        req = RegisterRequest(user_id="new_user", commitment="0xposeidon_hash")
+        valid_commitment = "12345678901234567890"
+        req = RegisterRequest(user_id="new_user", commitment=valid_commitment)
         res = register(req)
         self.assertTrue(res.success)
         self.assertEqual(res.message, "Engagement enregistré")
         self.assertIsNotNone(self.storage.get_engagement("new_user"))
 
     def test_register_conflict(self):
-        from routes.register import register, RegisterRequest
-        # En environnement sans FastAPI complet, HTTPException est soit notre mock soit celle de FastAPI
-        try:
-            from fastapi import HTTPException
-        except ImportError:
-            HTTPException = Exception
+        from routes.register import register
 
-        req = RegisterRequest(user_id="duplicate_user", commitment="0xposeidon_hash")
+        valid_commitment = "12345678901234567890"
+        req = RegisterRequest(user_id="duplicate_user", commitment=valid_commitment)
         register(req)
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(HTTPException) as ctx:
             register(req)
+        self.assertEqual(ctx.exception.status_code, 409)
 
-    def test_get_nonce(self):
+    def test_register_store_dependency_error(self):
+        from routes.register import register
+
+        with patch("routes.register.save_commitment", side_effect=RuntimeError("DB disconnected")):
+            req = RegisterRequest(user_id="alice_err", commitment="12345")
+            with self.assertRaises(HTTPException) as ctx:
+                register(req)
+            self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_get_nonce_success(self):
         from routes.nonce import get_nonce
 
-        res = get_nonce("test_user_nonce")
-        self.assertIsNotNone(res.nonce)
-        self.assertEqual(len(res.nonce), 64)  # 32 octets hex = 64 caractères
-        self.assertGreater(res.expires_at, time.time())
+        mock_nonce = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        mock_exp = int(time.time() + 60)
+
+        with patch("routes.nonce.request_nonce_from_node", return_value=(mock_nonce, mock_exp)):
+            res = get_nonce("test_user_nonce")
+            self.assertIsNotNone(res.nonce)
+            self.assertTrue(res.success)
+            self.assertEqual(len(res.nonce), 64)  # 256 bits = 64 caractères hex
+            self.assertEqual(res.nonce, mock_nonce)
+            self.assertGreater(res.expires_at, time.time())
+            self.assertIsInstance(res.defis, list)
+
+    def test_get_nonce_nodes_unavailable_raises_503(self):
+        from routes.nonce import get_nonce
+
+        with patch("routes.nonce.request_nonce_from_node", return_value=(None, None)):
+            with self.assertRaises(HTTPException) as ctx:
+                get_nonce("test_user_no_nodes")
+            self.assertEqual(ctx.exception.status_code, 503)
+
+
+class TestPrompt2NonceSecurity(unittest.TestCase):
+    """Tests de sécurité avancés PROMPT 2 pour les nonces 256 bits."""
+
+    def test_nonce_store_emits_256_bit_hex_nonce(self):
+        from verification.nonces import NonceStore
+        store_inst = NonceStore(duree_s=60)
+        nonce, exp_ms = store_inst.emettre("alice", "facein-web")
+
+        self.assertEqual(len(nonce), 64)
+        self.assertTrue(all(c in "0123456789abcdef" for c in nonce))
+        self.assertGreater(exp_ms, int(time.time() * 1000))
+
+    def test_nonce_single_use_strictly_enforced(self):
+        from verification.nonces import NonceStore
+        store_inst = NonceStore()
+        nonce, _ = store_inst.emettre("alice", "facein-web")
+
+        # Première consommation : valide
+        self.assertTrue(store_inst.consommer("alice", nonce, "facein-web"))
+        # Seconde consommation : rejet (rejeu impossible)
+        self.assertFalse(store_inst.consommer("alice", nonce, "facein-web"))
+
+    def test_nonce_service_cible_isolation(self):
+        from verification.nonces import NonceStore
+        store_inst = NonceStore()
+        # Émis pour facein-web
+        nonce, _ = store_inst.emettre("bob", "facein-web")
+
+        # Tentative de consommation pour facein-mobile -> rejeté
+        self.assertFalse(store_inst.consommer("bob", nonce, "facein-mobile"))
+        # Le nonce a été invalidé par la tentative
+        self.assertFalse(store_inst.consommer("bob", nonce, "facein-web"))
+
+    def test_nonce_expiration_enforced(self):
+        from verification.nonces import NonceStore
+        maintenant = [100.0]
+        store_inst = NonceStore(duree_s=60, horloge=lambda: maintenant[0])
+        nonce, _ = store_inst.emettre("charlie", "facein-web")
+
+        # Avance le temps de 61 secondes
+        maintenant[0] = 161.0
+        self.assertFalse(store_inst.consommer("charlie", nonce, "facein-web"))
+
+    def test_wrong_user_nonce_rejected(self):
+        from verification.nonces import NonceStore
+        store_inst = NonceStore()
+        nonce, _ = store_inst.emettre("alice", "facein-web")
+
+        self.assertFalse(store_inst.consommer("eve", nonce, "facein-web"))
+        # Eve ne peut pas consommer le nonce d'Alice, et le nonce est invalidé
+        self.assertFalse(store_inst.consommer("alice", nonce, "facein-web"))
+
+
+class TestStrictValidationAndSecurity(unittest.TestCase):
+    """Tests des règles de validation Pydantic, CORS et Rate Limiting."""
+
+    def setUp(self):
+        rate_limiter.reset_rate_limiter()
+
+    def tearDown(self):
+        rate_limiter.reset_rate_limiter()
+
+    def test_valid_user_ids(self):
+        self.assertEqual(validate_user_id_format("alice"), "alice")
+        self.assertEqual(validate_user_id_format("user_123-abc"), "user_123-abc")
+
+    def test_malformed_user_ids(self):
+        invalid_ids = ["ab", "a" * 65, "user@test", "user\nid", "<script>", "   "]
+        for uid in invalid_ids:
+            with self.assertRaises(ValueError):
+                validate_user_id_format(uid)
+
+    def test_valid_bn254_commitment(self):
+        self.assertEqual(validate_bn254_element("0"), "0")
+        self.assertEqual(validate_bn254_element("123456"), "123456")
+        hex_val = hex(BN254_FIELD_ORDER - 1)
+        self.assertEqual(validate_bn254_element(hex_val), hex_val)
+
+    def test_invalid_bn254_commitment(self):
+        # Supérieur à l'ordre du corps BN254
+        with self.assertRaises(ValueError):
+            validate_bn254_element(str(BN254_FIELD_ORDER))
+        # Non numérique
+        with self.assertRaises(ValueError):
+            validate_bn254_element("not_a_number")
+
+    def test_rate_limiting_enforcement(self):
+        limiter = rate_limiter.SlidingWindowRateLimiter()
+        # 3 requêtes max par tranche de 60 secondes
+        allowed, _ = limiter.check_rate_limit("client-1", max_requests=3, window_seconds=60)
+        self.assertTrue(allowed)
+        allowed, _ = limiter.check_rate_limit("client-1", max_requests=3, window_seconds=60)
+        self.assertTrue(allowed)
+        allowed, _ = limiter.check_rate_limit("client-1", max_requests=3, window_seconds=60)
+        self.assertTrue(allowed)
+        # 4e requête -> doit être rejetée
+        allowed, retry_after = limiter.check_rate_limit("client-1", max_requests=3, window_seconds=60)
+        self.assertFalse(allowed)
+        self.assertGreater(retry_after, 0)
+
+    def test_cors_configuration(self):
+        # Vérifie que le middleware CORS est bien configuré sur l'application FastAPI
+        cors_middleware = None
+        for middleware in api_main.app.user_middleware:
+            if "CORSMiddleware" in str(middleware.cls):
+                cors_middleware = middleware
+                break
+        self.assertIsNotNone(cors_middleware, "CORSMiddleware doit être configuré")
+        options = cors_middleware.kwargs
+        self.assertIn("http://localhost:3000", options.get("allow_origins", []))
+        self.assertIn("http://localhost:8000", options.get("allow_origins", []))
+        self.assertTrue(options.get("allow_credentials"))
+
+    def test_health_check_endpoint(self):
+        # Appel direct de la fonction health_check
+        res = api_main.health_check()
+        self.assertEqual(res.statut, "en_ligne")
+        self.assertEqual(res.service, "FaceIn API Gateway")
+        self.assertIn(res.stockage, ("memory", "postgres"))
+        self.assertGreaterEqual(res.noeuds_configures, 3)
 
 
 if __name__ == "__main__":

@@ -150,16 +150,41 @@ class VerificationService(verification_pb2_grpc.VerificationServiceServicer):
         )
 
     def DemanderNonce(self, request, context):
+        """Émet un nonce 256 bits lié à l'utilisateur et au service cible.
+
+        Le service_cible est enregistré avec le nonce : un nonce émis pour
+        "facein-web" ne peut pas être consommé pour "facein-mobile".
+        """
         if not request.utilisateur_id:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "utilisateur_id requis")
-        nonce, expiration = self._nonces.emettre(request.utilisateur_id)
+        service = request.service_cible or ""
+        nonce, expiration = self._nonces.emettre(request.utilisateur_id, service)
         return verification_pb2.ReponseNonce(
-            nonce=nonce, expiration_timestamp=expiration)
+            nonce=nonce,
+            expiration_timestamp=expiration,
+            service_cible=service,
+        )
 
     def VerifierPreuve(self, request, context):
-        if not self._nonces.consommer(request.utilisateur_id, request.nonce):
+        """Consomme le nonce et déclenche le consensus ZKP.
+
+        La consommation du nonce est ATOMIQUE et unique :
+        - vérification propriétaire + service_cible + expiry avant suppression
+        - un nonce invalide n'est PAS supprimé (log possible) mais refusé
+        L'API ne doit PAS consommer le nonce localement ; c'est fait ici.
+        """
+        # Validation de format et consommation atomique
+        nonce = request.nonce or ""
+        if (
+            len(nonce) != 64
+            or not all(c in "0123456789abcdefABCDEF" for c in nonce)
+            or not self._nonces.consommer(
+                request.utilisateur_id, nonce, request.service_cible or ""
+            )
+        ):
             return verification_pb2.ReponseVerification(
-                accepte=False, raison_refus="nonce invalide ou expiré")
+                accepte=False, raison_refus="nonce invalide ou expiré"
+            )
 
         # Les signaux publics ZKP voyagent avec la preuve dans le champ
         # ``preuve_zkp`` de la demande de vote (voir empaqueter_preuve).

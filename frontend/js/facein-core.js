@@ -314,6 +314,7 @@ class FaceInCore {
             currentVector,
             commitment,
             window.CONFIG.DISTANCE_THRESHOLD,
+            nonce,
           );
 
           // Calcul et affichage clair de la distance pour l'utilisateur

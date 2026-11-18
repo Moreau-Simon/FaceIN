@@ -28,15 +28,23 @@ message ReponseDonneeAide {
   string parametres_extraction = 3; // Métadonnées d'extraction ou de circuit additionnelles
 }
 
-// Demande d'un nonce éphémère anti-rejeu
+// Demande d'un nonce éphémère anti-rejeu 256 bits (challenge-response)
 message DemandeNonce {
   string utilisateur_id = 1;
+  // Identifiant du service demandeur (ex: "facein-web", "facein-mobile").
+  // Le nonce est lié à ce service : il ne peut pas être réutilisé pour un autre.
+  string service_cible = 2;
 }
 
-// Réponse contenant le nonce généré par le noeud
+// Réponse contenant le nonce 256 bits généré par le nœud
 message ReponseNonce {
+  // Nonce aléatoire 256 bits encodé en hexadécimal (64 caractères).
+  // Format : exactement 64 caractères [0-9a-f] en minuscules.
   string nonce = 1;
-  int64 expiration_timestamp = 2;  // Validité courte (60 secondes)
+  // Timestamp d'expiration en millisecondes (epoch Unix). Validité : 60 secondes.
+  int64 expiration_timestamp = 2;
+  // Écho du service cible pour lequel ce nonce a été émis.
+  string service_cible = 3;
 }
 
 // Demande de vérification de la preuve à divulgation nulle de connaissance (ZKP)
@@ -47,7 +55,13 @@ message DemandeVerification {
   int64 timestamp = 4;             // Horodatage de la requête
   string service_cible = 5;        // Service ou site demandeur
   string appareil_signature = 6;   // Signature matérielle ou d'appareil optionnelle
-  repeated string public_signals = 7; // Signaux publics ZKP : [engagementAttendu, seuilMax]
+  // Signaux publics ZKP (4 valeurs, ordre strict) :
+  //   [0] engagementAttendu  — Poseidon hash du vecteur de référence (entier BN254)
+  //   [1] seuilMax           — Distance maximale tolérée (entier BN254)
+  //   [2] nonceHi            — 128 bits de poids fort du nonce (nonce >> 128)
+  //   [3] nonceLo            — 128 bits de poids faible du nonce (nonce & 0xFFFF...FFFF)
+  // nonceHi et nonceLo lient cryptographiquement la preuve à ce challenge unique.
+  repeated string public_signals = 7;
 }
 
 // Réponse renvoyée après vérification de la preuve ZKP

@@ -126,19 +126,55 @@ class ZkpEngine {
     }
 
     /**
+     * Décompose un nonce 256 bits (hexadécimal de 64 caractères) en deux entiers de 128 bits
+     * (nonceHi et nonceLo) pour le circuit Circom et les signaux publics BN254.
+     * @param {string} nonceHex - Nonce hexadécimal de 64 caractères
+     * @returns {{ nonceHi: string, nonceLo: string }}
+     */
+    decomposeNonce(nonceHex) {
+        if (!nonceHex || typeof nonceHex !== 'string') {
+            throw new Error("Le nonce doit être une chaîne hexadécimale.");
+        }
+        let cleanHex = nonceHex.trim();
+        if (cleanHex.startsWith("0x") || cleanHex.startsWith("0X")) {
+            cleanHex = cleanHex.slice(2);
+        }
+        if (cleanHex.length < 64) {
+            cleanHex = cleanHex.padStart(64, '0');
+        } else if (cleanHex.length > 64) {
+            throw new Error(`Le nonce doit comporter au maximum 64 caractères hexadécimaux (${cleanHex.length} reçus).`);
+        }
+        const hiHex = cleanHex.slice(0, 32);
+        const loHex = cleanHex.slice(32);
+        const nonceHi = BigInt("0x" + hiHex).toString();
+        const nonceLo = BigInt("0x" + loHex).toString();
+        return { nonceHi, nonceLo };
+    }
+
+    /**
      * Génère la preuve ZKP Groth16 via snarkjs
      * @param {Float32Array|Float64Array|number[]} originalVector - Vecteur original de référence (privé)
      * @param {Float32Array|Float64Array|number[]} currentVector - Vecteur actuel capturé (privé)
      * @param {string} commitment - Engagement attendu (signal public)
      * @param {number|string} [threshold] - Seuil de distance au carré (signal public)
+     * @param {string} [nonce] - Nonce anti-rejeu 256 bits (64 hex chars) lié à la session
      * @returns {Promise<{ proof: object, publicSignals: string[] }>}
      */
-    async generateProof(originalVector, currentVector, commitment, threshold) {
+    async generateProof(originalVector, currentVector, commitment, threshold, nonce) {
         if (typeof window.snarkjs === 'undefined' || !window.snarkjs.groth16) {
             throw new Error("La bibliothèque snarkjs n'est pas chargée. Impossible de générer la preuve ZKP.");
         }
 
         const seuil = threshold !== undefined ? threshold : ((window.CONFIG && window.CONFIG.DISTANCE_THRESHOLD) || 6000000);
+
+        let nonceHi = "0";
+        let nonceLo = "0";
+        if (nonce) {
+            const decomposed = this.decomposeNonce(nonce);
+            nonceHi = decomposed.nonceHi;
+            nonceLo = decomposed.nonceLo;
+            console.log(`[ZkpEngine] Nonce décomposé en signaux publics: nonceHi=${nonceHi}, nonceLo=${nonceLo}`);
+        }
 
         // 1. Mise à l'échelle des vecteurs flottants
         const scaledOriginal = this.scaleVector(originalVector);
@@ -159,19 +195,23 @@ class ZkpEngine {
             console.warn(`[ZkpEngine] ATTENTION : la distance mesurée (${distSq}) dépasse le seuil configuré (${seuil}). Le circuit ZKP va rejeter la preuve car les visages sont jugés trop différents.`);
         }
 
-        // 2. Préparation du témoin / entrées du circuit Circom
+        // 2. Préparation du témoin / entrées du circuit Circom (avec liaison nonce anti-rejeu)
         const circuitInput = {
             vecteurOriginal: scaledOriginal,
             vecteurDuJour: scaledCurrent,
             engagementAttendu: commitment.toString(),
-            seuilMax: seuil.toString()
+            seuilMax: seuil.toString(),
+            nonceHi: nonceHi,
+            nonceLo: nonceLo
         };
 
         console.log("[ZkpEngine] Lancement de snarkjs.groth16.fullProve avec :", {
             wasmPath: this.wasmPath,
             zkeyPath: this.zkeyPath,
             seuilMax: seuil.toString(),
-            engagementAttendu: commitment.toString()
+            engagementAttendu: commitment.toString(),
+            nonceHi,
+            nonceLo
         });
 
         // 3. Calcul du témoin et génération de la preuve

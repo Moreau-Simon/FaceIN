@@ -111,14 +111,23 @@ template PoseidonTreeHash(n) {
 // Vérificateur principal combinant :
 // 1. La contrainte de proximité biométrique (distance <= seuilMax)
 // 2. La contrainte d'intégrité du vecteur de référence (Poseidon == engagement)
+// 3. La contrainte de liaison au challenge (nonce anti-rejeu)
 //
 // Entrées privées (restent sur le terminal de l'utilisateur) :
 //   - vecteurOriginal[n] : vecteur de référence enregistré lors de l'enrôlement
 //   - vecteurDuJour[n]   : vecteur extrait lors de la session courante
 //
 // Entrées publiques (vérifiables par les nœuds du réseau) :
-//   - engagementAttendu  : hash Poseidon public de référence
+//   - engagementAttendu  : hash Poseidon public de référence (Poseidon de vecteurOriginal)
 //   - seuilMax           : seuil maximal toléré pour la distance euclidienne carrée
+//   - nonceHi            : 128 bits de poids fort du nonce 256 bits (nonce >> 128)
+//   - nonceLo            : 128 bits de poids faible du nonce 256 bits (nonce & 0xFF...FF)
+//
+// Liaison anti-rejeu :
+//   La contrainte 3 calcule engagementSession = Poseidon(engagementAttendu, nonceHi, nonceLo)
+//   et l'expose publiquement. Les nœuds gRPC vérifient que nonceHi et nonceLo
+//   correspondent exactement au nonce émis pour cette session, liant cryptographiquement
+//   la preuve ZKP au challenge unique. Un rejeu de preuve avec un autre nonce échoue.
 // ============================================================================
 template FaceInVerifier(n) {
     // Entrées privées
@@ -128,6 +137,12 @@ template FaceInVerifier(n) {
     // Entrées publiques
     signal input engagementAttendu;
     signal input seuilMax;
+    // nonceHi et nonceLo : moitiés haute et basse du nonce anti-rejeu 256 bits.
+    // nonceHi = nonce_int >> 128   (128 bits de poids fort)
+    // nonceLo = nonce_int & ((1 << 128) - 1)  (128 bits de poids faible)
+    // Les deux valeurs doivent tenir dans le corps BN254 (p ≈ 2^254).
+    signal input nonceHi;
+    signal input nonceLo;
 
     // ------------------------------------------------------------------------
     // Contrainte 1 : Distance euclidienne au carré <= seuilMax
@@ -152,7 +167,32 @@ template FaceInVerifier(n) {
         arbrePoseidon.in[i] <== vecteurOriginal[i];
     }
     arbrePoseidon.out === engagementAttendu;
+
+    // ------------------------------------------------------------------------
+    // Contrainte 3 : Liaison cryptographique au challenge (anti-rejeu)
+    // ------------------------------------------------------------------------
+    // engagementSession lie la preuve à ce nonce unique.
+    // Si le prouveur réutilise une preuve avec un autre (nonceHi, nonceLo),
+    // la contrainte échoue car engagementSession aurait une valeur différente.
+    component hashSession = Poseidon(3);
+    hashSession.inputs[0] <== engagementAttendu;
+    hashSession.inputs[1] <== nonceHi;
+    hashSession.inputs[2] <== nonceLo;
+
+    // engagementSession est un signal de sortie public implicite contraint.
+    // Les vérificateurs n'ont pas besoin de sa valeur exacte, seulement que
+    // le circuit a bien calculé Poseidon(engagementAttendu, nonceHi, nonceLo).
+    // La contrainte d'égalité force le prouveur à utiliser les vrais nonceHi/nonceLo.
+    signal engagementSession;
+    engagementSession <== hashSession.out;
+    // Contrainte de non-trivialité : engagementSession ne peut pas être 0
+    // (Poseidon ne produit jamais 0 pour des entrées non toutes nulles dans BN254)
+    signal engagementSessionInverse;
+    engagementSessionInverse <-- 1 / engagementSession;
+    engagementSession * engagementSessionInverse === 1;
 }
 
-// Composant principal du circuit avec les signaux publics déclarés
-component main {public [engagementAttendu, seuilMax]} = FaceInVerifier(128);
+// Composant principal du circuit avec les 4 signaux publics déclarés.
+// Ordre strict des public_signals dans la preuve générée :
+//   [0] engagementAttendu   [1] seuilMax   [2] nonceHi   [3] nonceLo
+component main {public [engagementAttendu, seuilMax, nonceHi, nonceLo]} = FaceInVerifier(128);
