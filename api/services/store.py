@@ -31,13 +31,25 @@ class MemoryStore:
     def __init__(self):
         self.engagements: Dict[str, Dict[str, Any]] = {}
         self.nonces: Dict[str, Dict[str, Any]] = {}
+        self.users: set = set()
+
+    def ping(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        pass
 
     def clear(self) -> None:
         self.engagements.clear()
         self.nonces.clear()
+        self.users.clear()
+
+    def user_exists(self, user_id: str) -> bool:
+        return user_id in self.users or user_id in self.engagements
 
     # --- Engagements ---
     def save_engagement(self, user_id: str, commitment: str) -> None:
+        self.users.add(user_id)
         self.engagements[user_id] = {
             "user_id": user_id,
             "commitment": commitment,
@@ -93,49 +105,91 @@ class MemoryStore:
 class PostgresStore:
     """Store persistant branché sur le schéma PostgreSQL 16 de FaceIn."""
 
-    def __init__(self):
-        if psycopg2 is None:
+    def __init__(self, database_url: Optional[str] = None):
+        if psycopg2 is None or pool is None:
             raise ImportError(
                 "Le module 'psycopg2' est requis pour utiliser le backend 'postgres'."
             )
-        self.database_url = os.getenv(
+        self.database_url = database_url or os.getenv(
             "DATABASE_URL",
             "postgresql://facein_user:facein_password@localhost:5432/facein",
         )
-        self._pool = pool.SimpleConnectionPool(minconn=1, maxconn=10, dsn=self.database_url)
+        # ThreadedConnectionPool pour accès multithread concurrent sécurisé
+        self._pool = pool.ThreadedConnectionPool(minconn=2, maxconn=20, dsn=self.database_url)
+
+    def ping(self) -> bool:
+        """Contrôle de disponibilité de la base de données au démarrage."""
+        try:
+            with self.get_cursor() as cur:
+                cur.execute("SELECT 1;")
+                row = cur.fetchone()
+                return bool(row and row[0] == 1)
+        except Exception as exc:
+            logger.warning("Échec du contrôle de disponibilité PostgreSQL : %s", exc)
+            return False
+
+    def close(self) -> None:
+        """Ferme proprement toutes les connexions du pool au shutdown."""
+        if self._pool is not None:
+            try:
+                self._pool.closeall()
+                logger.info("Pool de connexions PostgreSQL fermé avec succès.")
+            except Exception as exc:
+                logger.warning("Erreur lors de la fermeture du pool PostgreSQL : %s", exc)
+            finally:
+                self._pool = None
 
     @contextmanager
     def get_cursor(self) -> Generator:
+        if self._pool is None:
+            raise RuntimeError("Le pool de connexions PostgreSQL est fermé.")
         conn = self._pool.getconn()
         try:
             with conn:
                 with conn.cursor() as cursor:
                     yield cursor
         finally:
-            self._pool.putconn(conn)
+            if self._pool is not None:
+                self._pool.putconn(conn)
+
+    def user_exists(self, user_id: str) -> bool:
+        """Vérifie l'existence de l'utilisateur indépendamment de l'état de son engagement."""
+        with self.get_cursor() as cur:
+            cur.execute("SELECT 1 FROM utilisateurs WHERE nom = %s LIMIT 1;", (user_id,))
+            return cur.fetchone() is not None
 
     def clear(self) -> None:
+        """TRUNCATE destructeur sécurisé (autorisé uniquement si explicitement configuré pour les tests)."""
+        allow_reset = os.getenv("ALLOW_DESTRUCTIVE_STORE_RESET", "false").strip().lower() in {
+            "1", "true", "yes"
+        }
+        if not allow_reset:
+            logger.warning(
+                "Tentative de clear() sur PostgreSQL ignorée : ALLOW_DESTRUCTIVE_STORE_RESET n'est pas activé."
+            )
+            return
         with self.get_cursor() as cur:
             cur.execute(
                 "TRUNCATE TABLE nonces, engagements_cryptographiques, utilisateurs CASCADE;"
             )
 
-    # --- Engagements ---
+    # --- Engagements atomiques ---
     def save_engagement(self, user_id: str, commitment: str) -> None:
+        """Enregistre un engagement de façon atomique et sans race condition."""
         with self.get_cursor() as cur:
-            # Récupération ou création de l'utilisateur
-            cur.execute("SELECT id FROM utilisateurs WHERE nom = %s LIMIT 1;", (user_id,))
-            row = cur.fetchone()
-            if row:
-                user_uuid = row[0]
-            else:
-                cur.execute(
-                    "INSERT INTO utilisateurs (nom) VALUES (%s) RETURNING id;",
-                    (user_id,),
-                )
-                user_uuid = cur.fetchone()[0]
+            # Upsert atomique de l'utilisateur (gère les accès concurrents sans doublons)
+            cur.execute(
+                """
+                INSERT INTO utilisateurs (nom)
+                VALUES (%s)
+                ON CONFLICT (nom) DO UPDATE SET nom = EXCLUDED.nom
+                RETURNING id;
+                """,
+                (user_id,),
+            )
+            user_uuid = cur.fetchone()[0]
 
-            # Révocation des anciens engagements actifs (maintient l'unicité actif)
+            # Révocation des anciens engagements actifs dans la même transaction
             cur.execute(
                 """
                 UPDATE engagements_cryptographiques
@@ -187,7 +241,7 @@ class PostgresStore:
             )
             return cur.rowcount > 0
 
-    # --- Nonces ---
+    # --- Nonces atomiques ---
     def save_nonce(self, nonce: str, user_id: str, expires_at: float) -> None:
         with self.get_cursor() as cur:
             cur.execute(
@@ -203,24 +257,28 @@ class PostgresStore:
     def consume_nonce(
         self, nonce: str, user_id: Optional[str] = None, now: Optional[float] = None
     ) -> bool:
+        """Consommation atomique via DELETE ... RETURNING en une seule opération SQL."""
         current_time = time.time() if now is None else float(now)
         with self.get_cursor() as cur:
-            cur.execute(
-                "SELECT user_id, expires_at FROM nonces WHERE nonce = %s;",
-                (nonce,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return False
-
-            stored_user_id, expires_at = row
-            if user_id is not None and stored_user_id != user_id:
-                return False
-            if expires_at < current_time:
-                return False
-
-            cur.execute("DELETE FROM nonces WHERE nonce = %s;", (nonce,))
-            return True
+            if user_id is not None:
+                cur.execute(
+                    """
+                    DELETE FROM nonces
+                    WHERE nonce = %s AND user_id = %s AND expires_at >= %s
+                    RETURNING nonce;
+                    """,
+                    (nonce, user_id, float(current_time)),
+                )
+            else:
+                cur.execute(
+                    """
+                    DELETE FROM nonces
+                    WHERE nonce = %s AND expires_at >= %s
+                    RETURNING nonce;
+                    """,
+                    (nonce, float(current_time)),
+                )
+            return cur.fetchone() is not None
 
     def purge_expired_nonces(self, now: Optional[float] = None) -> int:
         current_time = time.time() if now is None else float(now)
@@ -255,6 +313,15 @@ def get_store():
     return _current_store
 
 
+def close_store() -> None:
+    """Ferme proprement le store actif et ses connexions."""
+    global _current_store
+    if _current_store is not None:
+        if hasattr(_current_store, "close"):
+            _current_store.close()
+        _current_store = None
+
+
 def reset_store() -> None:
     """Réinitialise les données du store et libère l'instance."""
     global _current_store
@@ -263,26 +330,32 @@ def reset_store() -> None:
         if isinstance(_current_store, MemoryStore):
             _current_store.clear()
     elif backend in ("postgres", "postgresql"):
-        db_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://facein_user:facein_password@localhost:5432/facein",
-        )
-        try:
-            if psycopg2 is not None:
-                conn = psycopg2.connect(db_url)
-                with conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "TRUNCATE TABLE nonces, engagements_cryptographiques, utilisateurs CASCADE;"
-                        )
-                conn.close()
-        except Exception as e:
-            logger.debug("Erreur lors de la purge PostgreSQL : %s", e)
+        allow_reset = os.getenv("ALLOW_DESTRUCTIVE_STORE_RESET", "false").strip().lower() in {
+            "1", "true", "yes"
+        }
+        if allow_reset:
+            db_url = os.getenv(
+                "DATABASE_URL",
+                "postgresql://facein_user:facein_password@localhost:5432/facein",
+            )
+            try:
+                if psycopg2 is not None:
+                    conn = psycopg2.connect(db_url)
+                    with conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "TRUNCATE TABLE nonces, engagements_cryptographiques, utilisateurs CASCADE;"
+                            )
+                    conn.close()
+            except Exception as e:
+                logger.debug("Erreur lors de la purge PostgreSQL : %s", e)
+        else:
+            logger.info("reset_store() ignoré sur PostgreSQL (protection contre le TRUNCATE intempestif).")
 
-    _current_store = None
+    close_store()
 
 
-# Fonctions de compatibilité pour d'éventuels anciens modules
+# Fonctions de compatibilité pour les routes
 def save_commitment(user_id: str, commitment: str) -> None:
     get_store().save_engagement(user_id, commitment)
 
@@ -293,7 +366,7 @@ def get_commitment(user_id: str) -> Optional[str]:
 
 
 def user_exists(user_id: str) -> bool:
-    return get_store().get_engagement(user_id) is not None
+    return get_store().user_exists(user_id)
 
 
 def save_nonce(nonce: str, user_id: str, expires_at: float) -> None:

@@ -13,18 +13,18 @@ services:
     container_name: facein-postgres
     restart: always
     environment:
-      POSTGRES_DB: facein
-      POSTGRES_USER: facein_user
-      POSTGRES_PASSWORD: facein_password
+      POSTGRES_DB: ${POSTGRES_DB:-facein}
+      POSTGRES_USER: ${POSTGRES_USER:-facein_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-facein_password}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
     networks:
       - reseau-verification
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U facein_user -d facein"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-facein_user} -d ${POSTGRES_DB:-facein}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -103,6 +103,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      db:
+        condition: service_healthy
       node-a:
         condition: service_healthy
       node-b:
@@ -110,16 +112,17 @@ services:
       node-c:
         condition: service_healthy
     environment:
+      - STORE_BACKEND=postgres
       - TLS_ENABLED=true
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/api-gateway.crt
       - TLS_KEY=/app/certs/api-gateway.key
-      - DATABASE_URL=postgresql://facein_user:facein_password@db:5432/facein
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-facein_user}:${POSTGRES_PASSWORD:-facein_password}@db:5432/${POSTGRES_DB:-facein}
       - DB_HOST=db
       - DB_PORT=5432
-      - DB_NAME=facein
-      - DB_USER=facein_user
-      - DB_PASSWORD=facein_password
+      - DB_NAME=${POSTGRES_DB:-facein}
+      - DB_USER=${POSTGRES_USER:-facein_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-facein_password}
     volumes:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/api-gateway.crt:/app/certs/api-gateway.crt:ro

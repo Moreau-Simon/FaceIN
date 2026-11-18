@@ -27,12 +27,14 @@ try:
     from routes.nonce import router as nonce_router  # noqa: E402
     from routes.register import router as register_router  # noqa: E402
     from services.grpc_bridge import DEFAULT_NODES, fermer_canaux  # noqa: E402
+    from services.store import close_store, get_store  # noqa: E402
 except ImportError:
     from api.models import HealthResponse  # noqa: E402
     from api.routes.authenticate import router as authenticate_router  # noqa: E402
     from api.routes.nonce import router as nonce_router  # noqa: E402
     from api.routes.register import router as register_router  # noqa: E402
     from api.services.grpc_bridge import DEFAULT_NODES, fermer_canaux  # noqa: E402
+    from api.services.store import close_store, get_store  # noqa: E402
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -58,12 +60,23 @@ BANNER = r"""
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Journalise le démarrage et l'arrêt de l'API."""
+    """Gère le cycle de vie de l'API : contrôle du store au démarrage et fermeture propre."""
     logger.info("%s", BANNER)
-    logger.info("Passerelle API FaceIn démarrée.")
+    logger.info("Démarrage de la passerelle API FaceIn...")
+    try:
+        st = get_store()
+        if hasattr(st, "ping") and not st.ping():
+            logger.warning("Attention : Le backend de stockage n'a pas répondu au ping initial.")
+        else:
+            logger.info("Backend de stockage initialisé et opérationnel.")
+    except Exception as exc:
+        logger.warning("Avertissement lors de l'initialisation du store : %s", exc)
+
+    logger.info("Passerelle API FaceIn prête.")
     try:
         yield
     finally:
+        close_store()
         fermer_canaux()
         logger.info("Arrêt de la passerelle API FaceIn.")
 
@@ -169,8 +182,17 @@ app.include_router(authenticate_router, prefix="/api", tags=["Authentification"]
 def health_check():
     """Endpoint de contrôle de l'état de santé du service et de ses dépendances."""
     backend_stockage = os.getenv("STORE_BACKEND", "memory").lower()
+    store_ok = True
+    try:
+        st = get_store()
+        if hasattr(st, "ping"):
+            store_ok = st.ping()
+    except Exception:
+        store_ok = False
+
+    statut = "en_ligne" if store_ok else "degrade"
     return HealthResponse(
-        statut="en_ligne",
+        statut=statut,
         service="FaceIn API Gateway",
         version="1.0.0",
         stockage=backend_stockage,

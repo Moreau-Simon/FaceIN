@@ -10,9 +10,11 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS utilisateurs (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    nom              VARCHAR(100) NOT NULL,
+    nom              VARCHAR(100) NOT NULL UNIQUE,
     date_inscription TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_utilisateurs_nom ON utilisateurs(nom);
 
 CREATE TABLE IF NOT EXISTS engagements_cryptographiques (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -162,3 +164,16 @@ CREATE TABLE IF NOT EXISTS nonces (
     user_id    VARCHAR(255) NOT NULL,
     expires_at DOUBLE PRECISION NOT NULL
 );
+
+-- ------------------------------------------------------------
+-- BLOC M : Migrations Versionnées du Schéma
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version     VARCHAR(50) PRIMARY KEY,
+    applique_le TIMESTAMPTZ NOT NULL DEFAULT now(),
+    description TEXT
+);
+
+INSERT INTO schema_migrations (version, description)
+VALUES ('001_initial_schema', 'Initialisation du schéma complet avec unicité utilisateurs.nom')
+ON CONFLICT (version) DO NOTHING;

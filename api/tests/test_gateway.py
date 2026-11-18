@@ -89,6 +89,22 @@ class TestStoreService(unittest.TestCase):
 
         self.assertFalse(self.storage.consume_nonce(nonce, user_id))
 
+    def test_user_exists_independent_of_engagement_status(self):
+        user_id = "elena"
+        self.assertFalse(self.storage.user_exists(user_id))
+
+        self.storage.save_engagement(user_id, "999999999")
+        self.assertTrue(self.storage.user_exists(user_id))
+
+        # Après révocation, l'utilisateur existe toujours dans le registre
+        self.storage.revoke_engagement(user_id)
+        self.assertIsNone(self.storage.get_engagement(user_id))
+        self.assertTrue(self.storage.user_exists(user_id))
+
+    def test_store_ping_and_close(self):
+        self.assertTrue(self.storage.ping())
+        self.storage.close()
+
 
 class TestZkpVerifier(unittest.TestCase):
     """Tests du module de vérification ZKP."""
@@ -586,6 +602,13 @@ class TestStrictValidationAndSecurity(unittest.TestCase):
         self.assertEqual(res.service, "FaceIn API Gateway")
         self.assertIn(res.stockage, ("memory", "postgres"))
         self.assertGreaterEqual(res.noeuds_configures, 3)
+
+    def test_health_check_endpoint_degraded_when_store_down(self):
+        mock_broken_store = Mock()
+        mock_broken_store.ping.return_value = False
+        with patch("api.main.get_store", return_value=mock_broken_store):
+            res = api_main.health_check()
+            self.assertEqual(res.statut, "degrade")
 
 
 if __name__ == "__main__":
