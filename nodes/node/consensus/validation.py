@@ -20,12 +20,45 @@ from concurrent.futures import (
     TimeoutError,
     wait,
 )
+from dataclasses import dataclass, field
 from threading import BoundedSemaphore
-from typing import Any, Callable, List, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import grpc
+try:
+    import grpc
+    _RpcError = grpc.RpcError
+except ImportError:
+    grpc = None
+
+    class _RpcError(Exception):
+        pass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DetailVote:
+    """Représente un vote individuel d'un nœud du réseau."""
+    noeud_id: str
+    vote_pour: bool
+    raison: str = ""
+
+
+@dataclass
+class ResultatConsensus:
+    """Rapport détaillé et infalsifiable du consensus décentralisé."""
+    accepte: bool
+    coordinateur_id: str
+    votes: Dict[str, bool] = field(default_factory=dict)
+    votes_recus: List[DetailVote] = field(default_factory=list)
+    nb_votes_pour: int = 0
+    nb_votes_contre: int = 0
+    noeuds_indisponibles: List[str] = field(default_factory=list)
+    seuil_requis: int = 2
+    raison: str = ""
+
+    def __bool__(self) -> bool:
+        return self.accepte
 
 
 class VoteExecutor:
@@ -78,10 +111,30 @@ def _adresse_vote(pair: Any) -> str:
 
 
 def _extraire_vote(resultat: Any) -> bool:
-    vote = resultat[1] if isinstance(resultat, tuple) else resultat
+    if isinstance(resultat, tuple):
+        vote = resultat[1] if len(resultat) >= 2 else resultat[0]
+    else:
+        vote = resultat
     if type(vote) is not bool:
         raise ValueError(f"Vote invalide : {vote!r}")
     return vote
+
+
+def _extraire_info_vote(resultat: Any, default_node_id: str = "") -> Tuple[str, bool, str]:
+    """Extrait (node_id, vote_bool, raison) depuis la réponse d'un pair."""
+    if isinstance(resultat, tuple):
+        if len(resultat) >= 3:
+            nid, vote, raison = resultat[0], resultat[1], resultat[2]
+        elif len(resultat) == 2:
+            nid, vote, raison = resultat[0], resultat[1], ""
+        else:
+            nid, vote, raison = default_node_id, resultat[0], ""
+    else:
+        nid, vote, raison = default_node_id, resultat, ""
+
+    if type(vote) is not bool:
+        raise ValueError(f"Vote invalide : {vote!r}")
+    return str(nid or default_node_id), bool(vote), str(raison or "")
 
 
 def _interroger_avec_echeance(
@@ -107,9 +160,9 @@ def _journaliser_resultat_vote(pair: Any, future: Future[Any]) -> None:
 
     try:
         vote = _extraire_vote(future.result())
-    except grpc.RpcError as error:
-        code = error.code()
-        if code == grpc.StatusCode.DEADLINE_EXCEEDED:
+    except _RpcError as error:
+        code = getattr(error, "code", lambda: None)()
+        if grpc and hasattr(grpc, "StatusCode") and code == grpc.StatusCode.DEADLINE_EXCEEDED:
             logger.warning(
                 "Délai gRPC dépassé pour le vote demandé à %s",
                 adresse,
@@ -400,36 +453,78 @@ def decider(
     seuil,
     timeout_s,
     vote_executor: VoteExecutor,
+    node_id: str = "initiateur",
+    return_details: bool = False,
 ):
-    """Retourne True si le seuil de votes POUR (initiateur inclus) est atteint.
+    """Retourne la décision de consensus ou un objet ResultatConsensus si return_details=True.
 
-    ``interroger_pair`` peut retourner un booléen ou le tuple
-    ``(node_id, vote)`` renvoyé par le client gRPC.
+    ``interroger_pair`` peut retourner un booléen ou un tuple
+    ``(node_id, vote)`` ou ``(node_id, vote, raison)`` renvoyé par le client gRPC.
     Les appels distants partagent ``vote_executor`` et sont bornés par
     ``timeout_s`` ainsi que par la capacité de ce pool.
     """
-    pour = (
-        1
-        if verifier_local(
-            demande.utilisateur_id,
-            demande.preuve_zkp,
-            demande.nonce,
-            demande.service_cible,
+    total_noeuds = len(pairs) + 1
+    if seuil is None or seuil <= 0:
+        seuil = (total_noeuds // 2) + 1
+    elif seuil > total_noeuds:
+        seuil = total_noeuds
+
+    votes_recus: List[DetailVote] = []
+    votes_map: Dict[str, bool] = {}
+    noeuds_indisponibles: List[str] = []
+
+    try:
+        vote_local = bool(
+            verifier_local(
+                demande.utilisateur_id,
+                demande.preuve_zkp,
+                demande.nonce,
+                demande.service_cible,
+            )
         )
-        else 0
+        raison_locale = "" if vote_local else "Vérification locale invalide"
+    except Exception as exc:
+        logger.exception(
+            "Erreur inattendue pendant la vérification locale pour %s",
+            getattr(demande, "utilisateur_id", ""),
+        )
+        vote_local = False
+        raison_locale = f"Erreur locale: {exc}"
+
+    votes_recus.append(
+        DetailVote(noeud_id=node_id, vote_pour=vote_local, raison=raison_locale)
     )
-    if pour >= seuil:
+    votes_map[node_id] = vote_local
+    pour = 1 if vote_local else 0
+    contre = 0 if vote_local else 1
+
+    if pour >= seuil and not pairs:
+        # Seul nœud du réseau ou seuil déjà atteint sans pairs
+        if return_details:
+            return ResultatConsensus(
+                accepte=True,
+                coordinateur_id=node_id,
+                votes=votes_map,
+                votes_recus=votes_recus,
+                nb_votes_pour=pour,
+                nb_votes_contre=contre,
+                noeuds_indisponibles=noeuds_indisponibles,
+                seuil_requis=seuil,
+                raison="",
+            )
         return True
 
     echeance = time.monotonic() + timeout_s
     futures: dict[Future[Any], Any] = {}
     for pair in pairs:
         restant = echeance - time.monotonic()
+        pair_ident = getattr(pair, "node_id", None) or _adresse_vote(pair)
         if restant <= 0:
             logger.warning(
                 "Délai global du consensus dépassé avant l'envoi du vote à %s",
-                _adresse_vote(pair),
+                pair_ident,
             )
+            noeuds_indisponibles.append(pair_ident)
             break
         try:
             futur = vote_executor.submit(
@@ -443,14 +538,16 @@ def decider(
         except RuntimeError:
             logger.exception(
                 "Impossible de soumettre le vote demandé à %s",
-                _adresse_vote(pair),
+                pair_ident,
             )
+            noeuds_indisponibles.append(pair_ident)
             continue
         if futur is None:
             logger.warning(
                 "Capacité du pool de votes saturée pour %s",
-                _adresse_vote(pair),
+                pair_ident,
             )
+            noeuds_indisponibles.append(pair_ident)
             continue
         futur.add_done_callback(
             lambda completed, pair=pair: _journaliser_resultat_vote(
@@ -465,7 +562,13 @@ def decider(
             restant = echeance - time.monotonic()
             if restant <= 0:
                 logger.warning("Délai global du consensus dépassé")
+                for f in en_attente:
+                    f.cancel()
+                    pair = futures[f]
+                    p_id = getattr(pair, "node_id", None) or _adresse_vote(pair)
+                    noeuds_indisponibles.append(p_id)
                 break
+
             termines, en_attente = wait(
                 en_attente,
                 timeout=restant,
@@ -473,22 +576,56 @@ def decider(
             )
             if not termines:
                 logger.warning("Délai global du consensus dépassé")
+                for f in en_attente:
+                    f.cancel()
+                    pair = futures[f]
+                    p_id = getattr(pair, "node_id", None) or _adresse_vote(pair)
+                    noeuds_indisponibles.append(p_id)
                 break
+
             for futur in termines:
+                pair = futures[futur]
+                pair_ident = getattr(pair, "node_id", None) or _adresse_vote(pair)
+                if futur.cancelled():
+                    continue
                 try:
-                    vote = _extraire_vote(futur.result())
+                    res = futur.result()
+                    nid, vote, raison = _extraire_info_vote(
+                        res, default_node_id=pair_ident
+                    )
+                    votes_map[nid] = vote
+                    votes_recus.append(
+                        DetailVote(noeud_id=nid, vote_pour=vote, raison=raison)
+                    )
+                    if vote:
+                        pour += 1
+                    else:
+                        contre += 1
                 except CancelledError:
                     continue
                 except Exception:
-                    continue
-                if vote:
-                    pour += 1
-                if pour >= seuil:
-                    for restant_futur in en_attente:
-                        restant_futur.cancel()
-                    return True
+                    noeuds_indisponibles.append(pair_ident)
     finally:
         for futur in en_attente:
             futur.cancel()
 
-    return False
+    accepte = pour >= seuil
+    if return_details:
+        raison_finale = (
+            ""
+            if accepte
+            else f"Consensus non atteint ({pour}/{total_noeuds} votes positifs, {seuil} requis)"
+        )
+        return ResultatConsensus(
+            accepte=accepte,
+            coordinateur_id=node_id,
+            votes=votes_map,
+            votes_recus=votes_recus,
+            nb_votes_pour=pour,
+            nb_votes_contre=contre,
+            noeuds_indisponibles=noeuds_indisponibles,
+            seuil_requis=seuil,
+            raison=raison_finale,
+        )
+
+    return accepte

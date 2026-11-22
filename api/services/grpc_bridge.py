@@ -122,11 +122,11 @@ def _verifier_noeud_unitaire(
     proof_json_str: str,
     nonce: str,
     public_signals: Optional[list[str]] = None,
-) -> Optional[tuple[str, bool, str, str]]:
+) -> Optional[dict[str, Any]]:
     """
     Appelle la méthode `VerifierPreuve` sur un noeud gRPC spécifique (noeud initiateur).
     
-    Retourne (node_id, accepte, token, raison_refus) si le noeud a répondu,
+    Retourne un dictionnaire contenant les détails complets du consensus si le noeud a répondu,
     ou None si le noeud est injoignable (déclenche le basculement/failover).
     """
     node_id = node["id"]
@@ -135,12 +135,31 @@ def _verifier_noeud_unitaire(
     target = f"{host}:{port}"
 
     if grpc is None or verification_pb2 is None or verification_pb2_grpc is None:
-        logger.warning(
-            "[%s] Protobuf/gRPC non compilé ou indisponible. "
-            "Mode simulation initiale actif : vote accordé.",
-            node_id,
-        )
-        return node_id, True, "token-simule", ""
+        if (
+            os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in {"1", "true"}
+            or os.getenv("ALLOW_MOCK_CONSENSUS", "").lower() in {"1", "true"}
+        ):
+            logger.warning(
+                "[%s] Protobuf/gRPC non disponible - simulation de test active.",
+                node_id,
+            )
+            return {
+                "node_id": node_id,
+                "accepte": True,
+                "token": "token-simule",
+                "raison_refus": "",
+                "coordinateur_id": node_id,
+                "votes": {node_id: True},
+                "votes_recus": [
+                    {"noeud_id": node_id, "vote_pour": True, "raison": ""}
+                ],
+                "nb_votes_pour": 1,
+                "nb_votes_contre": 0,
+                "noeuds_indisponibles": [],
+                "seuil_requis": 1,
+            }
+        logger.error("[%s] Protobuf/gRPC non compilé ou indisponible.", node_id)
+        return None
 
     try:
         channel = _creer_canal(target)
@@ -166,14 +185,53 @@ def _verifier_noeud_unitaire(
 
         reponse = stub.VerifierPreuve(demande, timeout=TIMEOUT_NOEUD_SECONDES)
 
-        logger.info(
-            "[%s] Réponse reçue du noeud initiateur : accepte=%s, raison='%s', token_present=%s",
-            node_id,
-            reponse.accepte,
-            reponse.raison_refus,
-            bool(reponse.token),
+        votes_map = {}
+        votes_recus_list = []
+        for v in getattr(reponse, "votes_recus", []):
+            votes_map[v.noeud_id] = bool(v.vote_pour)
+            votes_recus_list.append(
+                {
+                    "noeud_id": v.noeud_id,
+                    "vote_pour": bool(v.vote_pour),
+                    "raison": str(v.raison or ""),
+                }
+            )
+
+        coordinateur = str(getattr(reponse, "coordinateur_id", "") or node_id)
+        nb_pour = int(
+            getattr(reponse, "nb_votes_pour", 1 if reponse.accepte else 0)
         )
-        return node_id, bool(reponse.accepte), str(reponse.token), str(reponse.raison_refus)
+        nb_contre = int(
+            getattr(reponse, "nb_votes_contre", 0 if reponse.accepte else 1)
+        )
+        noeuds_indispos = [
+            str(n) for n in getattr(reponse, "noeuds_indisponibles", [])
+        ]
+        seuil = int(getattr(reponse, "seuil_requis", 2))
+
+        logger.info(
+            "[%s] Réponse reçue du coordinateur : accepte=%s, pour=%d, contre=%d, seuil=%d, raison='%s'",
+            coordinateur,
+            reponse.accepte,
+            nb_pour,
+            nb_contre,
+            seuil,
+            reponse.raison_refus,
+        )
+
+        return {
+            "node_id": node_id,
+            "accepte": bool(reponse.accepte),
+            "token": str(reponse.token or ""),
+            "raison_refus": str(reponse.raison_refus or ""),
+            "coordinateur_id": coordinateur,
+            "votes": votes_map,
+            "votes_recus": votes_recus_list,
+            "nb_votes_pour": nb_pour,
+            "nb_votes_contre": nb_contre,
+            "noeuds_indisponibles": noeuds_indispos,
+            "seuil_requis": seuil,
+        }
 
     except grpc.RpcError as rpc_error:
         logger.warning(
@@ -207,38 +265,18 @@ def verify_on_nodes(
     Architecture (Sujet FaceIN P2P) :
     1. L'API Gateway contacte un seul noeud coordinateur (noeud initiateur).
     2. Ce noeud valide la preuve localement et orchestre le consensus décentralisé
-       en interrogeant ses pairs via le RPC interne `ConsensusService.DemanderVote` (consensus.proto).
-    3. Si le premier noeud est injoignable (panne, arrêt), un mécanisme de repli (failover)
-       tente automatiquement le noeud suivant de la liste.
-    4. Cela résout définitivement la tempête gRPC (double consensus) tout en garantissant
-       la haute disponibilité du service.
-
-    Retourne :
-        dict : {
-            "consensus": bool,
-            "votes": {"node-a": bool, "node-b": bool, "node-c": bool},
-            "majority": "3/3" ou "0/3",
-            "initiator": "node-a",
-            "token": str,
-            "reason": str
-        }
+       en interrogeant ses pairs via le RPC interne `ConsensusService.DemanderVote`.
+    3. Si le premier noeud est injoignable (panne, arrêt), le failover tente le noeud suivant.
+    4. Si le coordinateur a répondu par un refus (consensus négatif), aucun failover n'est tenté.
+    5. Les votes et résultats retournés sont les informations authentiques du consensus.
     """
     target_nodes = nodes or DEFAULT_NODES
+    total_nodes = len(target_nodes)
+    seuil_defaut = (total_nodes // 2) + 1
 
-    # Si gRPC n'est pas installé dans l'environnement d'exécution
-    if grpc is None or verification_pb2 is None or verification_pb2_grpc is None:
-        logger.warning("Protobuf/gRPC non disponible dans l'environnement. Mode simulation actif.")
-        votes = {n["id"]: True for n in target_nodes}
-        return {
-            "consensus": True,
-            "votes": votes,
-            "majority": f"{len(target_nodes)}/{len(target_nodes)}",
-            "initiator": target_nodes[0]["id"] if target_nodes else "mock",
-            "token": "token-simule",
-            "reason": "",
-        }
+    noeuds_indisponibles_cumules: list[str] = []
 
-    # Tentative d'interrogation séquentielle avec basculement (failover)
+    # Tentative d'interrogation séquentielle avec failover sur panne réseau/timeout
     for node in target_nodes:
         node_id = node["id"]
         logger.info("Délégation du consensus au noeud initiateur [%s]...", node_id)
@@ -255,59 +293,84 @@ def verify_on_nodes(
                 "[%s] Noeud injoignable, basculement vers le noeud suivant...",
                 node_id,
             )
+            noeuds_indisponibles_cumules.append(node_id)
             continue
 
-        nid, accepte, token, raison = resultat
-        logger.info(
-            "Consensus résolu par le réseau via l'initiateur [%s] : accepte=%s, raison='%s'",
-            nid,
-            accepte,
-            raison,
+        # Le nœud coordinateur a répondu (communication réussie).
+        # Règle : Une décision négative calculée NE DOIT PAS être relancée par failover.
+        accepte = bool(resultat["accepte"])
+        coordinateur = resultat.get("coordinateur_id") or node_id
+        votes = resultat.get("votes", {})
+        nb_pour = resultat.get("nb_votes_pour", 1 if accepte else 0)
+        nb_contre = resultat.get("nb_votes_contre", 0 if accepte else 1)
+        seuil = resultat.get("seuil_requis", seuil_defaut)
+        indispos = list(
+            dict.fromkeys(
+                resultat.get("noeuds_indisponibles", [])
+                + noeuds_indisponibles_cumules
+            )
         )
 
-        # Les pairs ont été consultés par l'initiateur via le protocole P2P
-        votes = {n["id"]: accepte for n in target_nodes}
-        majority_str = (
-            f"{len(target_nodes)}/{len(target_nodes)}"
-            if accepte
-            else f"0/{len(target_nodes)}"
+        majority_str = f"{nb_pour}/{total_nodes}"
+
+        logger.info(
+            "Consensus résolu par le réseau via l'initiateur [%s] : accepte=%s (pour=%d, contre=%d, seuil=%d, raison='%s')",
+            coordinateur,
+            accepte,
+            nb_pour,
+            nb_contre,
+            seuil,
+            resultat.get("raison_refus", ""),
         )
 
         return {
             "consensus": accepte,
             "votes": votes,
             "majority": majority_str,
-            "initiator": nid,
-            "token": token,
-            "reason": raison,
+            "initiator": coordinateur,
+            "token": resultat.get("token", ""),
+            "reason": resultat.get("raison_refus", ""),
+            "nb_votes_pour": nb_pour,
+            "nb_votes_contre": nb_contre,
+            "noeuds_indisponibles": indispos,
+            "seuil_requis": seuil,
         }
 
     # Cas où tous les noeuds gRPC sont injoignables
     logger.warning("Tous les noeuds du réseau de consensus sont injoignables.")
 
-    # Hors conteneur (mode test unitaire / mock initial)
-    if not os.path.exists("/.dockerenv") and os.getenv("ENVIRONMENT") != "production":
+    if (
+        os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in {"1", "true"}
+        or os.getenv("ALLOW_MOCK_CONSENSUS", "").lower() in {"1", "true"}
+    ):
         logger.warning(
-            "Mode test local sans stack active : simulation d'un consensus favorable."
+            "Mode test local : simulation d'un consensus favorable."
         )
         votes = {n["id"]: True for n in target_nodes}
         return {
             "consensus": True,
             "votes": votes,
-            "majority": f"{len(target_nodes)}/{len(target_nodes)}",
+            "majority": f"{total_nodes}/{total_nodes}",
             "initiator": target_nodes[0]["id"] if target_nodes else "none",
             "token": "token-simule-fallback",
             "reason": "",
+            "nb_votes_pour": total_nodes,
+            "nb_votes_contre": 0,
+            "noeuds_indisponibles": [],
+            "seuil_requis": seuil_defaut,
         }
 
-    votes = {n["id"]: False for n in target_nodes}
     return {
         "consensus": False,
-        "votes": votes,
-        "majority": f"0/{len(target_nodes)}",
-        "initiator": "none",
-        "token": "",
-        "reason": "Tous les noeuds de vérification sont injoignables",
+        "votes": {},
+        "majority": f"0/{total_nodes}",
+        "initiator": None,
+        "token": None,
+        "reason": "Tous les nœuds de vérification sont injoignables",
+        "nb_votes_pour": 0,
+        "nb_votes_contre": 0,
+        "noeuds_indisponibles": [n["id"] for n in target_nodes],
+        "seuil_requis": seuil_defaut,
     }
 
 

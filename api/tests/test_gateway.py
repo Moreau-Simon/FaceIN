@@ -288,7 +288,7 @@ class TestJwtManager(unittest.TestCase):
 
 
 class TestAuthenticateLogic(unittest.TestCase):
-    """Tests du flux d'authentification biométrique ZKP (architecture PROMPT 2)."""
+    """Tests du flux d'authentification biométrique ZKP."""
 
     def setUp(self):
         store.reset_store()
@@ -500,8 +500,8 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
             self.assertEqual(ctx.exception.status_code, 503)
 
 
-class TestPrompt2NonceSecurity(unittest.TestCase):
-    """Tests de sécurité avancés PROMPT 2 pour les nonces 256 bits."""
+class TestNonceSecurity(unittest.TestCase):
+    """Tests de sécurité avancés pour les nonces 256 bits."""
 
     def test_nonce_store_emits_256_bit_hex_nonce(self):
         from verification.nonces import NonceStore

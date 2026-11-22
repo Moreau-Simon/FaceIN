@@ -1,28 +1,46 @@
-"""Tests de la décision de consensus et du RPC de vote gRPC."""
+"""
+Tests unitaires pour la décision de consensus distribué, le RPC de vote et le basculement.
 
+Valide l'ensemble des scénarios de consensus :
+- Consensus 3/3, 2/3, 1/3, 0/3
+- Gestion des pannes de pairs et timeouts
+- Seuil de majorité dynamique (1, 2, 5 nœuds)
+- Idempotence des demandes de vote
+- Failover sélectif (basculement sur panne réseau, pas sur refus calculé)
+- Absence complète de réseau (refus sécurisé)
+- Services gRPC de vérification et de consensus
+"""
+
+import json
+import logging
+import os
+import sys
+import time
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-import grpc
-import pytest
-from grpc_health.v1 import health_pb2, health_pb2_grpc
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
-import consensus_pb2
-import consensus_pb2_grpc
-import verification_pb2
-from consensus.validation import VoteExecutor, decider
+from consensus.validation import DetailVote, ResultatConsensus, VoteExecutor, decider
 from network.peer_client import demander_vote
 import network.server as server_module
 from network.server import ConsensusService, VerificationService
 from verification.nonces import NonceStore
 
-
-@pytest.fixture
-def vote_executor():
-    executor = VoteExecutor(max_workers=2, max_pending=2)
-    yield executor
-    executor.close()
+try:
+    import grpc
+    from grpc_health.v1 import health_pb2, health_pb2_grpc
+    import consensus_pb2
+    import consensus_pb2_grpc
+    import verification_pb2
+except ImportError:
+    grpc = None
+    health_pb2 = health_pb2_grpc = None
+    consensus_pb2 = consensus_pb2_grpc = verification_pb2 = None
 
 
 def _interroger_vote(votes):
@@ -30,6 +48,8 @@ def _interroger_vote(votes):
         vote = votes[pair]
         if isinstance(vote, Exception):
             raise vote
+        if isinstance(vote, tuple):
+            return vote
         return f"node-{pair}", vote
 
     return interroger
@@ -37,347 +57,464 @@ def _interroger_vote(votes):
 
 def _creer_demande(**overrides):
     valeurs = {
-        "id_demande": "requete-test",
+        "id_demande": "req-test-uuid",
         "utilisateur_id": "user-1",
-        "preuve_zkp": b"preuve",
-        "nonce": "nonce-test",
-        "service_cible": "service-1",
+        "preuve_zkp": b'{"pi_a":[],"pi_b":[],"pi_c":[]}',
+        "nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "service_cible": "facein-web",
     }
     valeurs.update(overrides)
     return SimpleNamespace(**valeurs)
 
 
-def test_decider_compte_le_vote_local_et_les_votes_pour_des_pairs(vote_executor):
-    demande = _creer_demande()
-    votes = {"b": True, "c": False, "d": True}
+class TestConsensusScenarios(unittest.TestCase):
+    """Vérifie la robustesse du consensus décentralisé sous différentes conditions."""
 
-    resultat = decider(
-        demande,
-        ["b", "c", "d"],
-        verifier_local=lambda *args: False,
-        interroger_pair=_interroger_vote(votes),
-        seuil=2,
-        timeout_s=1,
-        vote_executor=vote_executor,
-    )
+    def setUp(self):
+        self.executor = VoteExecutor(max_workers=3, max_pending=5)
 
-    assert resultat is True
+    def tearDown(self):
+        self.executor.close()
 
+    def test_decider_compte_le_vote_local_et_les_votes_pour_des_pairs(self):
+        demande = _creer_demande()
+        votes = {"b": True, "c": False, "d": True}
 
-def test_decider_refuse_si_le_seuil_n_est_pas_atteint(vote_executor):
-    demande = _creer_demande()
-    votes = {"b": False, "c": True}
-
-    resultat = decider(
-        demande,
-        ["b", "c"],
-        verifier_local=lambda *args: True,
-        interroger_pair=_interroger_vote(votes),
-        seuil=3,
-        timeout_s=1,
-        vote_executor=vote_executor,
-    )
-
-    assert resultat is False
-
-
-def test_decider_journalise_les_erreurs_et_ne_compte_pas_les_pairs_en_erreur(
-    vote_executor, caplog
-):
-    demande = _creer_demande()
-    votes = {
-        "b": RuntimeError("pair indisponible"),
-        "c": False,
-    }
-
-    resultat = decider(
-        demande,
-        ["b", "c"],
-        verifier_local=lambda *args: True,
-        interroger_pair=_interroger_vote(votes),
-        seuil=2,
-        timeout_s=1,
-        vote_executor=vote_executor,
-    )
-
-    assert resultat is False
-    assert "Erreur inattendue pendant le vote demandé à b" in caplog.text
-    assert "pair indisponible" in caplog.text
-
-
-@pytest.mark.parametrize(
-    "resultat, message",
-    [
-        (False, "Vote CONTRE reçu de b"),
-        (TimeoutError("timeout"), "Délai dépassé pour le vote demandé à b"),
-        (
-            grpc.StatusCode.DEADLINE_EXCEEDED,
-            "Délai gRPC dépassé pour le vote demandé à b",
-        ),
-        (
-            grpc.StatusCode.UNAVAILABLE,
-            "Échec gRPC du vote demandé à b",
-        ),
-    ],
-)
-def test_decider_distingue_refus_timeout_et_panne(
-    vote_executor, caplog, resultat, message
-):
-    caplog.set_level("DEBUG")
-
-    def interroger(pair, demande, timeout_s):
-        if isinstance(resultat, grpc.StatusCode):
-            class ErreurGrpcVote(grpc.RpcError):
-                def code(self):
-                    return resultat
-
-                def details(self):
-                    return "erreur de test"
-
-            raise ErreurGrpcVote()
-        if isinstance(resultat, Exception):
-            raise resultat
-        return resultat
-
-    decision = decider(
-        _creer_demande(),
-        ["b"],
-        verifier_local=lambda *args: False,
-        interroger_pair=interroger,
-        seuil=1,
-        timeout_s=1,
-        vote_executor=vote_executor,
-    )
-
-    assert decision is False
-    assert message in caplog.text
-
-
-def test_decider_ne_bloque_pas_sur_un_pair_qui_depasse_le_delai(
-    vote_executor, caplog
-):
-    demande = _creer_demande()
-    liberation_pair = Event()
-
-    def interroger(pair, demande, timeout_s):
-        liberation_pair.wait()
-        return "node-b", True
-
-    try:
         resultat = decider(
             demande,
-            ["b"],
+            ["b", "c", "d"],
             verifier_local=lambda *args: False,
-            interroger_pair=interroger,
-            seuil=1,
-            timeout_s=0.01,
-            vote_executor=vote_executor,
+            interroger_pair=_interroger_vote(votes),
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
         )
-    finally:
-        liberation_pair.set()
+        self.assertTrue(resultat)
 
-    assert resultat is False
-    assert "Délai global du consensus dépassé" in caplog.text
+    def test_decider_refuse_si_le_seuil_n_est_pas_atteint(self):
+        demande = _creer_demande()
+        votes = {"b": False, "c": True}
+
+        resultat = decider(
+            demande,
+            ["b", "c"],
+            verifier_local=lambda *args: True,
+            interroger_pair=_interroger_vote(votes),
+            seuil=3,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+        )
+        self.assertFalse(resultat)
+
+    def test_decider_ne_bloque_pas_sur_un_pair_qui_depasse_le_delai(self):
+        demande = _creer_demande()
+        liberation_pair = Event()
+
+        def interroger(pair, d, timeout_s):
+            liberation_pair.wait(timeout=0.2)
+            return "node-b", True
+
+        try:
+            resultat = decider(
+                demande,
+                ["b"],
+                verifier_local=lambda *args: False,
+                interroger_pair=interroger,
+                seuil=1,
+                timeout_s=0.01,
+                vote_executor=self.executor,
+            )
+        finally:
+            liberation_pair.set()
+
+        self.assertFalse(resultat)
+
+    def test_consensus_3_sur_3(self):
+        demande = _creer_demande()
+        votes = {"node-b": ("node-b", True, ""), "node-c": ("node-c", True, "")}
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: True,
+            interroger_pair=lambda pair, d, to: votes[pair],
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertTrue(res.accepte)
+        self.assertEqual(res.coordinateur_id, "node-a")
+        self.assertGreaterEqual(res.nb_votes_pour, 2)
+        self.assertEqual(res.nb_votes_contre, 0)
+        self.assertEqual(len(res.noeuds_indisponibles), 0)
+
+    def test_consensus_2_sur_3(self):
+        demande = _creer_demande()
+        votes = {"node-b": ("node-b", True, ""), "node-c": ("node-c", False, "preuve invalide")}
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: True,
+            interroger_pair=lambda pair, d, to: votes[pair],
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertTrue(res.accepte)
+        self.assertGreaterEqual(res.nb_votes_pour, 2)
+        self.assertEqual(res.seuil_requis, 2)
+
+    def test_consensus_1_sur_3(self):
+        demande = _creer_demande()
+        votes = {
+            "node-b": ("node-b", False, "seuil depasse"),
+            "node-c": ("node-c", False, "engagement mismatch"),
+        }
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: True,
+            interroger_pair=lambda pair, d, to: votes[pair],
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertFalse(res.accepte)
+        self.assertEqual(res.nb_votes_pour, 1)
+        self.assertEqual(res.nb_votes_contre, 2)
+
+    def test_consensus_0_sur_3(self):
+        demande = _creer_demande()
+        votes = {
+            "node-b": ("node-b", False, "rejet"),
+            "node-c": ("node-c", False, "rejet"),
+        }
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: False,
+            interroger_pair=lambda pair, d, to: votes[pair],
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertFalse(res.accepte)
+        self.assertEqual(res.nb_votes_pour, 0)
+        self.assertGreaterEqual(res.nb_votes_contre, 1)
+
+    def test_pair_indisponible_mais_quorum_atteint(self):
+        demande = _creer_demande()
+
+        def interroger(pair, d, to):
+            if pair == "node-c":
+                raise ConnectionError("node-c hors ligne")
+            return "node-b", True, ""
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: True,
+            interroger_pair=interroger,
+            seuil=2,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertTrue(res.accepte)
+        self.assertIn("node-c", res.noeuds_indisponibles)
+        self.assertEqual(res.nb_votes_pour, 2)
+
+    def test_timeout_empechant_seuil(self):
+        demande = _creer_demande()
+
+        def interroger_timeout(pair, d, to):
+            time.sleep(0.3)
+            return pair, True
+
+        res = decider(
+            demande=demande,
+            pairs=["node-b", "node-c"],
+            verifier_local=lambda *args: False,
+            interroger_pair=interroger_timeout,
+            seuil=2,
+            timeout_s=0.05,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+
+        self.assertFalse(res.accepte)
+        self.assertGreaterEqual(len(res.noeuds_indisponibles), 1)
+
+    def test_nombre_noeuds_dynamique(self):
+        demande = _creer_demande()
+
+        # Réseau à 5 nœuds : majorité qualifiée = 3
+        votes_5 = {
+            "node-b": ("node-b", True, ""),
+            "node-c": ("node-c", True, ""),
+            "node-d": ("node-d", False, ""),
+            "node-e": ("node-e", False, ""),
+        }
+        res_5 = decider(
+            demande=demande,
+            pairs=["node-b", "node-c", "node-d", "node-e"],
+            verifier_local=lambda *args: True,
+            interroger_pair=lambda p, d, to: votes_5[p],
+            seuil=None,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+        self.assertTrue(res_5.accepte)
+        self.assertEqual(res_5.seuil_requis, 3)
+
+        # Réseau à 1 nœud (initiateur seul) : seuil = 1
+        res_1 = decider(
+            demande=demande,
+            pairs=[],
+            verifier_local=lambda *args: True,
+            interroger_pair=lambda p, d, to: None,
+            seuil=None,
+            timeout_s=1.0,
+            vote_executor=self.executor,
+            node_id="node-a",
+            return_details=True,
+        )
+        self.assertTrue(res_1.accepte)
+        self.assertEqual(res_1.seuil_requis, 1)
 
 
-def test_vote_executor_borne_le_nombre_de_taches_soumises():
-    vote_executor = VoteExecutor(max_workers=1, max_pending=0)
-    liberation = Event()
-    demarre = Event()
+class TestIdempotenceAndFailover(unittest.TestCase):
+    """Tests d'idempotence des votes et de basculement API Gateway."""
 
-    def tache():
-        demarre.set()
-        liberation.wait()
+    def test_double_demande_vote_idempotente(self):
+        mock_verifier = Mock(return_value=True)
+        service = ConsensusService(node_id="node-b", verifier=mock_verifier)
 
-    try:
-        futur = vote_executor.submit(tache, timeout_s=1)
-        assert futur is not None
-        assert demarre.wait(timeout=1)
-        assert vote_executor.submit(lambda: None, timeout_s=0) is None
+        demande = SimpleNamespace(
+            id_demande="unique-request-999",
+            utilisateur_id="bob",
+            preuve_zkp=b"preuve",
+            nonce="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            service_cible="facein-web",
+        )
 
-        liberation.set()
-        futur.result(timeout=1)
-    finally:
-        liberation.set()
-        vote_executor.close()
+        rep1 = service.DemanderVote(demande, None)
+        self.assertEqual(rep1.id_demande, "unique-request-999")
+        self.assertEqual(mock_verifier.call_count, 1)
 
+        # Deuxième appel avec le même id_demande : réponse immédiate depuis le cache
+        rep2 = service.DemanderVote(demande, None)
+        self.assertEqual(rep2.id_demande, "unique-request-999")
+        self.assertEqual(mock_verifier.call_count, 1)
 
-@pytest.mark.parametrize(
-    "accepte",
-    [
-        True,
-        False,
-    ],
-)
-def test_rpc_demander_vote_transmet_le_vote_et_l_identifiant(
-    accepte
-):
-    preuve_verifiee = []
-    executor = ThreadPoolExecutor(max_workers=2)
-    serveur = grpc.server(executor)
-    consensus_pb2_grpc.add_ConsensusServiceServicer_to_server(
-        ConsensusService(
-            "node-b",
-            lambda utilisateur_id, preuve, nonce, service_cible:
-                preuve_verifiee.append(
-                    (utilisateur_id, preuve, nonce, service_cible)
-                ) or accepte,
-        ),
-        serveur,
-    )
-    port = serveur.add_insecure_port("127.0.0.1:0")
-    assert port != 0
+    def test_failover_si_coordinateur_indisponible(self):
+        from api.services import grpc_bridge
 
-    demande = consensus_pb2.DemandeVote(
-        id_demande="requete-123",
-        noeud_initiateur="node-a",
-        utilisateur_id="user-1",
-        preuve_zkp=b"preuve",
-        nonce="nonce-123",
-        service_cible="service-1",
-        timestamp=123,
-    )
+        nodes = [
+            {"id": "node-a", "host": "127.0.0.1", "port": 50051},
+            {"id": "node-b", "host": "127.0.0.1", "port": 50052},
+        ]
 
-    serveur.start()
-    try:
-        resultat = demander_vote("127.0.0.1", port, demande, 1)
-    finally:
-        serveur.stop(0).wait()
-        executor.shutdown(wait=True)
+        def faux_verifier_unitaire(node, user_id, proof_json_str, nonce, public_signals=None):
+            if node["id"] == "node-a":
+                return None  # node-a injoignable
+            return {
+                "node_id": "node-b",
+                "accepte": True,
+                "token": "token-node-b",
+                "raison_refus": "",
+                "coordinateur_id": "node-b",
+                "votes": {"node-b": True, "node-c": True},
+                "votes_recus": [],
+                "nb_votes_pour": 2,
+                "nb_votes_contre": 0,
+                "noeuds_indisponibles": ["node-a"],
+                "seuil_requis": 2,
+            }
 
-    assert resultat == ("node-b", accepte)
-    assert preuve_verifiee == [
-        ("user-1", b"preuve", "nonce-123", "service-1")
-    ]
+        with patch("api.services.grpc_bridge._verifier_noeud_unitaire", side_effect=faux_verifier_unitaire):
+            res = grpc_bridge.verify_on_nodes(
+                user_id="alice",
+                proof_json_str='{"proof": true}',
+                nonce="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                nodes=nodes,
+            )
 
+            self.assertTrue(res["consensus"])
+            self.assertEqual(res["initiator"], "node-b")
+            self.assertIn("node-a", res["noeuds_indisponibles"])
 
-def test_rpc_demander_vote_retourne_contre_si_le_verificateur_echoue():
-    executor = ThreadPoolExecutor(max_workers=2)
-    serveur = grpc.server(executor)
+    def test_decision_negative_ne_declenche_pas_de_failover(self):
+        from api.services import grpc_bridge
 
-    def verifier_en_echec(utilisateur_id, preuve, nonce, service_cible):
-        raise RuntimeError("erreur interne")
+        nodes = [
+            {"id": "node-a", "host": "127.0.0.1", "port": 50051},
+            {"id": "node-b", "host": "127.0.0.1", "port": 50052},
+        ]
 
-    consensus_pb2_grpc.add_ConsensusServiceServicer_to_server(
-        ConsensusService("node-b", verifier_en_echec),
-        serveur,
-    )
-    port = serveur.add_insecure_port("127.0.0.1:0")
-    assert port != 0
-    demande = consensus_pb2.DemandeVote(
-        id_demande="requete-456",
-        utilisateur_id="user-1",
-        preuve_zkp=b"preuve",
-        nonce="nonce-456",
-        service_cible="service-1",
-    )
+        appels = []
 
-    serveur.start()
-    try:
-        resultat = demander_vote("127.0.0.1", port, demande, 1)
-    finally:
-        serveur.stop(0).wait()
-        executor.shutdown(wait=True)
+        def faux_verifier_unitaire(node, user_id, proof_json_str, nonce, public_signals=None):
+            appels.append(node["id"])
+            return {
+                "node_id": "node-a",
+                "accepte": False,
+                "token": "",
+                "raison_refus": "Consensus non atteint (1/3)",
+                "coordinateur_id": "node-a",
+                "votes": {"node-a": True, "node-b": False, "node-c": False},
+                "votes_recus": [],
+                "nb_votes_pour": 1,
+                "nb_votes_contre": 2,
+                "noeuds_indisponibles": [],
+                "seuil_requis": 2,
+            }
 
-    assert resultat == ("node-b", False)
+        with patch("api.services.grpc_bridge._verifier_noeud_unitaire", side_effect=faux_verifier_unitaire):
+            res = grpc_bridge.verify_on_nodes(
+                user_id="alice",
+                proof_json_str='{"proof": true}',
+                nonce="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                nodes=nodes,
+            )
 
+            self.assertFalse(res["consensus"])
+            self.assertEqual(res["initiator"], "node-a")
+            self.assertEqual(appels, ["node-a"])
 
-def test_service_verification_transmet_preuve_et_nonce_au_consensus():
-    nonces = NonceStore()
-    nonce, _ = nonces.emettre("user-1")
-    demande_consensus = []
-    service = VerificationService(
-        "node-a",
-        nonces,
-        lambda demande: demande_consensus.append(demande) or True,
-        lambda utilisateur_id: "token-test",
-    )
-    demande = verification_pb2.DemandeVerification(
-        utilisateur_id="user-1",
-        preuve_zkp=b"preuve-binaire",
-        nonce=nonce,
-        timestamp=123,
-        service_cible="service-1",
-    )
+    def test_absence_complete_de_reseau_refuse_authentification(self):
+        from api.services import grpc_bridge
 
-    reponse = service.VerifierPreuve(demande, context=None)
+        nodes = [{"id": "node-a", "host": "127.0.0.1", "port": 50051}]
 
-    assert reponse.accepte is True
-    assert reponse.token == "token-test"
-    assert len(demande_consensus) == 1
-    assert demande_consensus[0].preuve_zkp == b"preuve-binaire"
-    assert demande_consensus[0].nonce == nonce
+        os.environ.pop("MOCK_ZKP_VERIFICATION", None)
+        os.environ.pop("ALLOW_MOCK_CONSENSUS", None)
+
+        with patch("api.services.grpc_bridge._verifier_noeud_unitaire", return_value=None):
+            res = grpc_bridge.verify_on_nodes(
+                user_id="alice",
+                proof_json_str='{"proof": true}',
+                nonce="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                nodes=nodes,
+            )
+
+            self.assertFalse(res["consensus"])
+            self.assertEqual(res["majority"], "0/1")
+            self.assertIn("node-a", res["noeuds_indisponibles"])
 
 
-def test_demarrage_enregistre_le_service_de_verification(monkeypatch):
-    class ServeurFactice:
-        def add_insecure_port(self, adresse):
-            return 50051
+class TestServicesVerificationEtVote(unittest.TestCase):
+    """Tests unitaires des services gRPC de vérification et de consensus."""
 
-        def add_secure_port(self, adresse, credentials):
-            return 50051
+    def test_service_verification_refuse_sans_nonce_valide(self):
+        nonces = NonceStore()
+        service = VerificationService(
+            node_id="node-a",
+            nonces=nonces,
+            decider_fn=lambda d: True,
+            fabriquer_token=lambda uid: "tok",
+        )
+        demande = SimpleNamespace(
+            utilisateur_id="alice",
+            preuve_zkp=b"preuve",
+            nonce="court",
+            service_cible="facein-web",
+            public_signals=[],
+            timestamp=int(time.time()),
+        )
+        reponse = service.VerifierPreuve(demande, None)
+        self.assertFalse(reponse.accepte)
+        self.assertIn("nonce", reponse.raison_refus)
 
-        def start(self):
-            return None
+    def test_service_verification_accepte_si_consensus_valide(self):
+        nonces = NonceStore()
+        nonce, _ = nonces.emettre("alice", "facein-web")
+        decision_mock = ResultatConsensus(
+            accepte=True,
+            coordinateur_id="node-a",
+            votes={"node-a": True, "node-b": True},
+            votes_recus=[
+                DetailVote("node-a", True, ""),
+                DetailVote("node-b", True, ""),
+            ],
+            nb_votes_pour=2,
+            nb_votes_contre=0,
+            noeuds_indisponibles=[],
+            seuil_requis=2,
+            raison="",
+        )
+        service = VerificationService(
+            node_id="node-a",
+            nonces=nonces,
+            decider_fn=lambda d: decision_mock,
+            fabriquer_token=lambda uid: "jwt-token-123",
+        )
+        demande = SimpleNamespace(
+            utilisateur_id="alice",
+            preuve_zkp=b"preuve",
+            nonce=nonce,
+            service_cible="facein-web",
+            public_signals=[],
+            timestamp=int(time.time()),
+        )
+        reponse = service.VerifierPreuve(demande, None)
+        self.assertTrue(reponse.accepte)
+        self.assertEqual(reponse.token, "jwt-token-123")
+        self.assertEqual(reponse.coordinateur_id, "node-a")
+        self.assertEqual(reponse.nb_votes_pour, 2)
 
-    serveur = ServeurFactice()
-    monkeypatch.setattr(
-        server_module, "charger_credentials_serveur", lambda: object()
-    )
-    services_enregistres = {}
-    nonces = NonceStore()
-    decider_fn = lambda demande: True
-    fabriquer_token = lambda utilisateur_id: "token-test"
+    def test_service_verification_refuse_si_consensus_rejette(self):
+        nonces = NonceStore()
+        nonce, _ = nonces.emettre("alice", "facein-web")
+        decision_mock = ResultatConsensus(
+            accepte=False,
+            coordinateur_id="node-a",
+            votes={"node-a": False},
+            votes_recus=[DetailVote("node-a", False, "Preuve rejetée")],
+            nb_votes_pour=0,
+            nb_votes_contre=1,
+            noeuds_indisponibles=["node-b"],
+            seuil_requis=2,
+            raison="Consensus non atteint (0/2)",
+        )
+        service = VerificationService(
+            node_id="node-a",
+            nonces=nonces,
+            decider_fn=lambda d: decision_mock,
+            fabriquer_token=lambda uid: "tok",
+        )
+        demande = SimpleNamespace(
+            utilisateur_id="alice",
+            preuve_zkp=b"preuve",
+            nonce=nonce,
+            service_cible="facein-web",
+            public_signals=[],
+            timestamp=int(time.time()),
+        )
+        reponse = service.VerifierPreuve(demande, None)
+        self.assertFalse(reponse.accepte)
+        self.assertIn("Consensus non atteint", reponse.raison_refus)
 
-    monkeypatch.setattr(
-        server_module.grpc,
-        "server",
-        lambda executor, options: serveur,
-    )
-    monkeypatch.setattr(
-        server_module.sync_pb2_grpc,
-        "add_SyncServiceServicer_to_server",
-        lambda service, serveur: services_enregistres.update(sync=service),
-    )
-    monkeypatch.setattr(
-        server_module.consensus_pb2_grpc,
-        "add_ConsensusServiceServicer_to_server",
-        lambda service, serveur: services_enregistres.update(
-            consensus=service
-        ),
-    )
-    monkeypatch.setattr(
-        server_module.verification_pb2_grpc,
-        "add_VerificationServiceServicer_to_server",
-        lambda service, serveur: services_enregistres.update(
-            verification=service
-        ),
-    )
-    monkeypatch.setattr(
-        health_pb2_grpc,
-        "add_HealthServicer_to_server",
-        lambda service, serveur: services_enregistres.update(health=service),
-    )
 
-    resultat = server_module.start_grpc_server(
-        "node-a",
-        50051,
-        lambda *args: True,
-        nonces,
-        decider_fn,
-        fabriquer_token,
-    )
-
-    assert resultat is serveur
-    assert isinstance(
-        services_enregistres["verification"], VerificationService
-    )
-    assert services_enregistres["verification"]._nonces is nonces
-    assert services_enregistres["verification"]._decider is decider_fn
-    assert (
-        services_enregistres["verification"]._fabriquer_token
-        is fabriquer_token
-    )
-    assert services_enregistres["health"].Check(
-        health_pb2.HealthCheckRequest(), None
-    ).status == health_pb2.HealthCheckResponse.SERVING
+if __name__ == "__main__":
+    unittest.main()

@@ -1,7 +1,7 @@
 """
 Tests unitaires pour le magasin d'engagements cryptographiques (EngagementsStore).
 
-Couvre (PROMPT 4) :
+Couvre :
 - Persistance atomique sur disque
 - Format enrichi (statut, updated_at, version)
 - Révocation et idempotence

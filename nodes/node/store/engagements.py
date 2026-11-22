@@ -4,7 +4,7 @@ Gestionnaire de stockage persistant pour les engagements cryptographiques (commi
 Conserve les engagements calculés (hachage Poseidon du vecteur biométrique de référence)
 associés à chaque identifiant utilisateur sur les nœuds de vérification.
 
-Caractéristiques (PROMPT 4) :
+Caractéristiques :
 - Thread-safe pour les accès concurrents gRPC.
 - Persistance atomique sur disque (écriture temporaire + os.replace pour éviter la corruption).
 - Prise en charge des statuts (actif / révoqué) et de l'horodatage.

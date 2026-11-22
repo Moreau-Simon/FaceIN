@@ -73,12 +73,25 @@ message DemandeVerification {
   repeated string public_signals = 7;
 }
 
+// Détail d'un vote individuel reçu par le coordinateur
+message DetailVote {
+  string noeud_id = 1;
+  bool vote_pour = 2;
+  string raison = 3;
+}
+
 // Réponse renvoyée après vérification de la preuve ZKP
 message ReponseVerification {
   bool accepte = 1;
-  string raison_refus = 2;       // Raison du refus (vide si accepté)
-  string token = 3;              // Jeton de session / JWT (fourni uniquement si accepté)
-  int64 score_anomalie = 4;      // Score de détection de fraude / anomalie
+  string raison_refus = 2; // Raison du refus (vide si accepté)
+  string token = 3; // Jeton de session / JWT (fourni uniquement si accepté)
+  int64 score_anomalie = 4; // Score de détection de fraude / anomalie
+  string coordinateur_id = 5; // Identifiant du nœud coordinateur ayant orchestré le consensus
+  repeated DetailVote votes_recus = 6; // Votes individuels réellement reçus (initiateur + pairs)
+  int32 nb_votes_pour = 7; // Nombre total de votes positifs
+  int32 nb_votes_contre = 8; // Nombre total de votes négatifs
+  repeated string noeuds_indisponibles = 9; // Identifiants des nœuds n'ayant pas répondu
+  int32 seuil_requis = 10; // Seuil de majorité requis
 }
 
 // Demande d'enregistrement ou de mise à jour d'un engagement de référence

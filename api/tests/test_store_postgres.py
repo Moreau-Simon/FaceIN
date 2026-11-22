@@ -1,6 +1,6 @@
 """
 Tests unitaires et d'intégration pour le backend PostgreSQL du store FaceIn.
-Couvre les exigences du PROMPT 3 :
+Couvre les exigences du stockage persistant :
 - Pool thread-safe (ThreadedConnectionPool)
 - Contrôle de disponibilité (ping)
 - Inscription et mise à jour atomique d'engagements

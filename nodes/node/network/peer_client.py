@@ -8,12 +8,19 @@ import os
 from pathlib import Path
 from threading import Lock
 
-import grpc
+try:
+    import grpc
+except ImportError:
+    grpc = None
 
-import consensus_pb2
-import consensus_pb2_grpc
-import sync_pb2
-import sync_pb2_grpc
+try:
+    import consensus_pb2
+    import consensus_pb2_grpc
+    import sync_pb2
+    import sync_pb2_grpc
+except ImportError:
+    consensus_pb2 = consensus_pb2_grpc = None
+    sync_pb2 = sync_pb2_grpc = None
 from network.peers import formater_adresse_pair
 
 logger = logging.getLogger(__name__)

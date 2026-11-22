@@ -4,7 +4,7 @@ Route d'authentification biométrique ZKP avec consensus décentralisé.
 Valide la preuve mathématique Groth16 sans révéler le vecteur facial,
 et consulte le réseau de pairs gRPC pour le consensus distribué.
 
-Architecture nonce (PROMPT 2) :
+Architecture nonce :
 - Le nonce est géré UNIQUEMENT par les nœuds gRPC (autorité unique).
 - L'API ne stocke PAS le nonce et ne l'appelle PAS verify_nonce() localement.
 - La consommation du nonce est ATOMIQUE dans VerifierPreuve() côté nœud :

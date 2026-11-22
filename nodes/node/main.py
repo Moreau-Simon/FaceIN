@@ -144,6 +144,8 @@ def main():
             config["seuil_majorite"],
             config["timeout_ms_consensus"] / 1000,
             vote_executor,
+            node_id=config["node_id"],
+            return_details=True,
         )
 
     logger.info(
