@@ -1,58 +1,33 @@
 # Rapport qualité
 
-- **Date** : 2026-11-17
-- **Périmètre** : build de production et cinq pages React
-- **Verdict** : prêt avec réserves — l'interface et les démonstrations sont opérationnelles, mais aucune API FaceIN n'est disponible dans ce dépôt.
+- **Date** : 2026-11-22
+- **Périmètre** : six pages React (accueil, connexion, espace client, comment ça marche, intégrer, tarifs)
+- **Verdict** : prêt pour une première version, avec les réserves listées plus bas.
 
 ## Résultats
 
 | Vérification | Résultat |
 |---|---|
-| `npm install` | Réussi; 0 vulnérabilité signalée par npm |
-| `npm run build` | Réussi; TypeScript strict puis Vite 8 multipage |
-| Pages dans le serveur de prévisualisation | Les cinq URL renvoient HTTP 200 |
-| Responsive | 360, 768, 1024 et 1440 px; aucun débordement horizontal sur les cinq pages |
-| Navigation et ancres | Contact atteint le formulaire depuis la page Tarifs; aucune ancre locale manquante ni ID dupliqué |
-| Console navigateur | Aucune erreur JavaScript ou console pendant le contrôle des pages |
-| Widget d’aperçu | Dialogue supérieur, verrouillage du défilement, focus/restauration, Échap, clic sur l’overlay, sélection d’offre, mouvement réduit et rendu mobile vérifiés |
-| Navigation de l’en-tête | « Télécharger » et « À propos » retirés; Contact mène au formulaire |
-| Tarifs | Standard gratuit, Renforcée à 2,99 €/mois et Enterprise par groupe vérifiés |
-| Formulaire de contact | Validation et avertissement vérifiés; aucun message n’est envoyé sans service configuré |
-| Parcours d'inscription | Validation invalide bloquée; formulaire valide ouvre l'étape de démonstration et son avertissement |
-| Autres interactions | Onglets, menu mobile, recherche « Python »/aucun résultat, FAQ, copie de code, lien de contact et message de révocation vérifiés |
-| Clavier et mouvement réduit | Lien d'évitement visible au focus; préférence `prefers-reduced-motion` vérifiée |
+| `npm install` puis `npm run build` | Réussi (TypeScript strict, Vite multipage). Le `package-lock.json` désynchronisé de la branche a été régénéré. |
+| Débordement horizontal | Aucun à 360, 768, 1024 et 1440 px sur les six pages |
+| Console navigateur | Aucune erreur JavaScript sur les six pages |
+| Inscription de bout en bout | Réussie avec l’API de `capture_camera_photo` : caméra, modèles, descripteur 128D, coffre IndexedDB, engagement Poseidon, `POST /api/register` |
+| Connexion | `GET /api/nonce` et défis de présence reçus et affichés. Non validée jusqu’au jeton : voir réserves. |
+| Erreurs du parcours | Caméra refusée ou indisponible, pseudo inconnu sur l’appareil, API injoignable : messages explicites et bouton « Réessayer » |
+| Espace client | Accès refusé sans session (redirection vers la connexion), compte à rebours, « Mettre fin », filtres de l’historique |
+| Widgets de l’accueil | Survol, pression, ouverture agrandie animée, fermeture par Échap et clic extérieur, bascule d’offre, survol des barres |
+| Démonstration guidée | Défilement automatique, pause, navigation par étape, fermeture clavier |
+| Mouvement réduit | Animations désactivées ou figées avec `prefers-reduced-motion` |
+
+## Réserves
+
+- **Connexion complète non vérifiée ici** : le test s’est fait en navigateur automatisé, avec une photo comme caméra. Le calibrage du test de présence a échoué. C’est le comportement attendu face à une photo, mais l’environnement de test était aussi trop lent (environ 18 s par détection). La vérification finale par les nœuds (`POST /api/authenticate`) demande en plus le réseau de nœuds gRPC lancé avec `docker compose`. À tester sur un poste réel, avec une vraie caméra.
+- **Historique des connexions** : il est enregistré sur l’appareil en attendant une route API. Les lignes « Exemple » disparaissent dès la première connexion venant d’un site partenaire.
+- **Chiffres de l’accueil** : ce sont des exemples, signalés comme tels.
+- **Formulaire de contact et SDK** : aucun envoi ni SDK publié, ce qui est signalé dans l’interface.
 
 ## Taille du build
 
-- JavaScript : 426,34 kB (131,57 kB gzip).
-- CSS : 63,67 kB (14,51 kB gzip).
-- Les métriques LCP/INP/CLS n'ont pas été mesurées.
-
-## Contraste et accessibilité
-
-Contrastes calculés pour les principaux tokens sur fond blanc : `--ink` 15,54:1, `--muted` 5,43:1, `--primary` 6,19:1 et `--soft-muted` 5,20:1. Le focus clavier est visible, les champs ont des labels, les FAQ utilisent les éléments natifs `details/summary`, et les graphiques décoratifs ont un nom accessible.
-
-Ce contrôle n'est pas un audit WCAG automatisé complet; certains textes minuscules dans les maquettes illustratives restent à revoir lors d'une validation d'accessibilité formelle.
-
-## Corrections réalisées
-
-- Identifiants des dégradés SVG rendus uniques entre illustrations.
-- Débordement horizontal du code sur petit écran corrigé; toutes les pages passent désormais les quatre largeurs testées.
-- Ancres du guide d'intégration et chemins des cinq entrées vérifiés.
-- Exports JSX bruts inutilisés retirés après migration de leurs rendus vers les composants React.
-- Les widgets principaux de l’accueil peuvent être agrandis en premier plan dans un dialogue accessible.
-- Un aperçu produit interactif reprend les codes de composition Stripe avec une illustration locale et des indicateurs explicitement fictifs.
-- Le bouton de contact de la section finale a été retiré à la demande; les autres contenus de cette section sont conservés.
-- Le formulaire de contact et les tarifs demandés sont intégrés; l’absence de service de soumission et de facturation est signalée clairement.
-- Révocation, téléchargement et authentification ne prétendent pas appeler un service absent; les limites sont annoncées dans l'interface.
-- Les animations SVG et au scroll respectent `prefers-reduced-motion`.
-- Le flux caméra est arrêté/nettoyé lors de l'arrêt, du changement d'étape et du démontage du composant.
-
-## Réserves restantes
-
-- Aucun backend HTTP, SDK téléchargeable, compte, reconnaissance faciale, révocation ou jeton réel n'est fourni par ce projet; ces éléments ne sont pas simulés comme fonctionnels.
-- Le formulaire de contact est une maquette validable mais ne transmet pas les messages tant qu’un canal de réception n’est pas configuré.
-- Les offres et prix sont affichés, mais aucun abonnement ni paiement n’est encore connecté à un service de facturation.
-- L'aperçu caméra réel n'a pas été activé pendant le contrôle; il dépend d'une permission explicite et d'un appareil compatible.
-- Les tarifs, mentions légales et affirmations produit doivent être confirmés avant publication.
-- Un audit d'accessibilité formel et des mesures de performance réelles restent à effectuer.
+- JavaScript : environ 493 kB (157 kB gzip). Les bibliothèques biométriques sont chargées à la demande, uniquement sur la page de connexion.
+- CSS : environ 63 kB (14 kB gzip). La police Inter est auto-hébergée.
+- Modèles et circuit (`public/facein/`) : environ 25 Mo, téléchargés uniquement au démarrage de la caméra.

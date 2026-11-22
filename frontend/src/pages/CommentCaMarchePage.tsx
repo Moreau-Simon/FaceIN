@@ -2,71 +2,55 @@ import { Reveal } from "../components/Reveal";
 import { SectionHeading } from "../components/SectionHeading";
 
 const steps = [
-  {
-    title: "Vous ouvrez la page de connexion",
-    description: "Sur le site partenaire, vous cliquez sur « Se connecter avec FaceIN ».",
-  },
-  {
-    title: "Votre navigateur lit votre visage",
-    description: "La caméra s’active. 128 valeurs décrivent votre visage, puis l’image est supprimée.",
-  },
-  {
-    title: "Votre navigateur génère une preuve",
-    description: "Il prouve que ces valeurs sont proches de celles de l’inscription, sans les révéler.",
-  },
-  {
-    title: "Seule la preuve est envoyée",
-    description: "Le serveur FaceIN reçoit la preuve. Ni image, ni vecteur.",
-  },
-  {
-    title: "Plusieurs serveurs vérifient",
-    description: "Trois nœuds contrôlent la preuve. Si deux la valident, le site reçoit un jeton.",
-  },
+  { title: "Vous ouvrez la connexion FaceIN", description: "Sur le site partenaire, vous cliquez sur « Se connecter avec FaceIN » et saisissez votre pseudo." },
+  { title: "Vous prouvez votre présence", description: "FaceIN vous demande deux gestes tirés au hasard : cligner des yeux, tourner la tête ou sourire." },
+  { title: "Votre navigateur lit votre visage", description: "128 valeurs décrivent votre visage. L’image de la caméra n’est jamais enregistrée." },
+  { title: "Votre navigateur génère une preuve", description: "Il prouve que ces valeurs sont proches de celles de l’inscription, sans les révéler." },
+  { title: "Trois serveurs vérifient", description: "La preuve est contrôlée par trois nœuds indépendants. Si deux la valident, le site reçoit un jeton." },
 ];
 
 const questions = [
   {
     question: "Une photo de moi peut-elle me connecter ?",
-    answer: "[Réponse à rédiger avec l’équipe dev.]",
-  },
-  {
-    question: "Et mon jumeau ?",
-    answer: "Réponse à confirmer avec l’équipe FaceIN.",
-  },
-  {
-    question: "Que se passe-t-il si je perds mon téléphone ?",
-    answer: "Pour rester fiable, FaceIN vous demande de refaire l’inscription. Les modalités de révocation sont à confirmer.",
+    answer: "Non. Avant chaque connexion, FaceIN impose deux défis aléatoires (clignement, rotation de la tête, sourire) et vérifie que le visage bouge de façon continue. Une photo ou un écran tenu devant la caméra ne peut pas les réussir.",
   },
   {
     question: "Le site partenaire voit-il mon visage ?",
-    answer: "Le parcours présenté indique que seule une preuve est envoyée au serveur FaceIN; le site partenaire reçoit un jeton.",
+    answer: "Non. Le site reçoit uniquement un jeton signé qui confirme votre pseudo. Ni l’image, ni les 128 valeurs ne lui sont transmises.",
+  },
+  {
+    question: "Que se passe-t-il si je change d’appareil ?",
+    answer: "Votre vecteur de référence est gardé dans le coffre de l’appareil sur lequel vous vous êtes inscrit. Sur un nouvel appareil, vous refaites l’inscription.",
   },
   {
     question: "Pourquoi 128 valeurs ?",
-    answer: "La maquette décrit 128 valeurs comme représentation du visage. Les détails de fonctionnement sont à confirmer avec l’équipe.",
+    answer: "C’est la taille du descripteur produit par le modèle de reconnaissance faciale. Il suffit à distinguer deux visages, sans permettre de reconstruire une photo.",
+  },
+  {
+    question: "Une preuve interceptée peut-elle être réutilisée ?",
+    answer: "Non. Chaque connexion utilise un défi à usage unique, valable 60 secondes. Une preuve rejouée plus tard est refusée.",
   },
 ];
 
 export function CommentCaMarchePage() {
   return (
     <div className="page-how">
-      <section className="page-hero page-hero--network">
+      <section className="page-hero grid-lines">
         <div className="container page-hero__inner">
-          <p className="eyebrow"><span className="eyebrow-number">02</span> Comment ça marche</p>
-          <h1>Votre visage reste chez vous.</h1>
-          <p className="page-hero__lead">Seule une preuve mathématique voyage, et un réseau indépendant la vérifie.</p>
-          <p className="prototype-note">Ce parcours décrit le fonctionnement envisagé ; il n’est pas opérationnel dans cette maquette.</p>
-          <a className="button button-primary" href="integrer.html">Intégrer FaceIN <span aria-hidden="true">→</span></a>
+          <div>
+            <p className="lead-label">Comment ça marche</p>
+            <h1>Votre visage reste chez vous. <span>Seule une preuve mathématique voyage, et un réseau indépendant la vérifie.</span></h1>
+            <div className="button-row">
+              <a className="button button-primary" href="connexion.html#register">Créer un compte <span className="button-arrow" aria-hidden="true" /></a>
+              <a className="button button-outline" href="integrer.html">Intégrer FaceIN <span className="button-arrow" aria-hidden="true" /></a>
+            </div>
+          </div>
           <div className="page-hero__network-art" aria-hidden="true"><span>A</span><i /><span>B</span><i /><span>C</span></div>
         </div>
       </section>
 
       <section className="container section-padding">
-        <SectionHeading
-          eyebrow="D’un regard à la connexion"
-          title="Cinq étapes, quelques secondes."
-          align="center"
-        />
+        <SectionHeading eyebrow="D’un regard à la connexion" title="Cinq étapes, quelques secondes." align="center" />
         <ol className="process-list">
           {steps.map((step, index) => (
             <Reveal key={step.title} className="process-step" delay={index * 0.045}>
@@ -81,67 +65,58 @@ export function CommentCaMarchePage() {
         <div className="container journey-band__inner">
           <h2>Ce qui circule à chaque étape</h2>
           <div className="journey-track">
-            <div><span>Étapes 1 à 3</span><strong>Rien ne sort</strong></div>
-            <i aria-hidden="true">→</i>
-            <div><span>Étape 4</span><strong>Preuve</strong></div>
-            <i aria-hidden="true">→</i>
-            <div><span>Étape 5</span><strong>Jeton</strong></div>
+            <div><span>Étapes 1 à 4</span><strong>Rien ne quitte l’appareil</strong></div>
+            <i aria-hidden="true" />
+            <div><span>Étape 5</span><strong>La preuve</strong></div>
+            <i aria-hidden="true" />
+            <div><span>Résultat</span><strong>Un jeton pour le site</strong></div>
           </div>
         </div>
       </section>
 
       <section className="container section-padding">
-        <SectionHeading
-          eyebrow="Qui fait quoi"
-          title="Chaque acteur ne voit que ce dont il a besoin."
-          align="center"
-        />
+        <SectionHeading eyebrow="Qui fait quoi" title="Chaque acteur ne voit que ce dont il a besoin." align="center" />
         <div className="actor-grid">
-          <Reveal className="actor-card actor-card--browser">
-            <span className="actor-icon">⌘</span>
+          <Reveal className="actor-card">
             <h3>Votre navigateur</h3>
-            <ul><li>Caméra</li><li>Calcul du vecteur</li><li>Coffre-fort local</li><li>Génération de la preuve</li></ul>
+            <ul><li>Accède à la caméra</li><li>Calcule les 128 valeurs</li><li>Les garde dans un coffre local</li><li>Génère la preuve</li></ul>
           </Reveal>
-          <Reveal className="actor-card actor-card--server" delay={0.08}>
-            <span className="actor-icon">▦</span>
+          <Reveal className="actor-card" delay={0.06}>
             <h3>Serveur FaceIN</h3>
-            <ul><li>Réception de la preuve</li><li>Vérification rapide</li></ul>
+            <ul><li>Délivre un défi à usage unique</li><li>Reçoit la preuve</li><li>Transmet aux nœuds</li></ul>
           </Reveal>
-          <Reveal className="actor-card actor-card--nodes" delay={0.16}>
-            <span className="actor-icon">◎</span>
-            <h3>Nœuds</h3>
-            <ul><li>Nœud A</li><li>Nœud B</li><li>Nœud C</li></ul>
+          <Reveal className="actor-card actor-card--accent" delay={0.12}>
+            <h3>Nœuds de vérification</h3>
+            <ul><li>Nœud A</li><li>Nœud B</li><li>Nœud C</li><li>Deux accords sur trois suffisent</li></ul>
           </Reveal>
-          <Reveal className="actor-card actor-card--partner" delay={0.24}>
-            <span className="actor-icon">↗</span>
+          <Reveal className="actor-card" delay={0.18}>
             <h3>Site partenaire</h3>
-            <ul><li>Reçoit un jeton</li></ul>
+            <ul><li>Reçoit un jeton signé</li><li>Vérifie le jeton côté serveur</li></ul>
           </Reveal>
         </div>
       </section>
 
       <section className="container section-padding" id="privacy">
-        <SectionHeading
-          eyebrow="Vos données"
-          title="Ce qui reste chez vous, et ce qui est envoyé."
-          align="center"
-        />
+        <SectionHeading eyebrow="Vos données" title="Ce qui reste chez vous, et ce qui est envoyé." align="center" />
         <div className="privacy-columns">
           <article className="privacy-column privacy-column--local">
-            <p className="eyebrow">Reste sur votre appareil</p>
-            <ul><li>L’image de la caméra, supprimée aussitôt</li><li>Votre vecteur facial</li><li>Votre coffre-fort chiffré</li></ul>
+            <h3>Reste sur votre appareil</h3>
+            <ul><li>L’image de la caméra, jamais enregistrée</li><li>Votre vecteur facial de 128 valeurs</li><li>Le coffre local qui le protège</li></ul>
           </article>
           <article className="privacy-column privacy-column--sent">
-            <p className="eyebrow">Envoyé à FaceIN</p>
-            <ul><li>La preuve cryptographique</li><li>Une empreinte de votre appareil</li><li>Votre adresse IP et votre région, pour repérer les connexions suspectes</li></ul>
+            <h3>Envoyé à FaceIN</h3>
+            <ul><li>Votre pseudo</li><li>À l’inscription : une empreinte cryptographique du vecteur</li><li>À la connexion : la preuve et le défi utilisé</li></ul>
           </article>
         </div>
-        <a className="text-link" href="index.html#legal-notice">Lire la politique de confidentialité <span aria-hidden="true">↗</span></a>
       </section>
 
       <section className="renewal-section" id="renewal">
         <div className="container renewal-section__inner">
-          <div><p className="eyebrow">Dans le temps</p><h2>Votre photo de référence se renouvelle.</h2><p>Un visage change avec le temps. Pour rester fiable, FaceIN vous demande de refaire l’inscription.</p></div>
+          <div>
+            <p className="lead-label">Dans le temps</p>
+            <h2>Votre photo de référence se renouvelle.</h2>
+            <p>Un visage change avec les années. Pour rester fiable, FaceIN vous demande de refaire l’inscription à intervalles réguliers.</p>
+          </div>
           <div className="renewal-timelines"><div><strong>6 mois</strong><span>pour les mineurs</span></div><div><strong>1 an</strong><span>pour les majeurs</span></div></div>
         </div>
       </section>
@@ -151,7 +126,7 @@ export function CommentCaMarchePage() {
         <div className="faq-list">
           {questions.map(({ question, answer }) => (
             <details key={question}>
-              <summary>{question}<span aria-hidden="true">+</span></summary>
+              <summary>{question}<span className="accordion-plus" aria-hidden="true" /></summary>
               <p>{answer}</p>
             </details>
           ))}

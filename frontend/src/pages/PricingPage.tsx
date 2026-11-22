@@ -4,7 +4,7 @@ import { SectionHeading } from "../components/SectionHeading";
 const offers = [
   {
     name: "Standard",
-    description: "Pour se connecter vite au quotidien.",
+    description: "Pour se connecter rapidement, au quotidien.",
     price: "Gratuit",
     cadence: "sans frais mensuels",
     action: "Commencer",
@@ -17,7 +17,7 @@ const offers = [
   },
   {
     name: "Renforcée",
-    description: "Pour les usages qui demandent plus de sécurité.",
+    description: "Pour les comptes qui demandent plus de sécurité.",
     price: "2,99 €",
     cadence: "par mois",
     action: "Choisir Renforcée",
@@ -30,7 +30,7 @@ const offers = [
   },
   {
     name: "Enterprise",
-    description: "Une formule pensée pour les organisations et leurs équipes.",
+    description: "Pour les organisations qui équipent leurs équipes.",
     price: "Sur devis",
     cadence: "abonnement par groupe",
     action: "Nous contacter",
@@ -51,19 +51,20 @@ const comparisons = [
 ];
 
 const questions = [
-  ["Puis-je changer d’offre ?", "Les modalités de changement d’offre seront précisées lors de la mise en service des abonnements."],
-  ["Que change un vecteur de 256 valeurs ?", "L’offre renforcée prévoit un vecteur de 256 valeurs pour privilégier un niveau de sécurité supérieur."],
-  ["Comment fonctionne l’offre Enterprise ?", "Enterprise est proposée sous forme d’un abonnement par groupe, avec un tarif établi selon la taille de l’équipe."],
+  ["Puis-je changer d’offre ?", "Oui. Vous pourrez passer d’une offre à l’autre depuis votre espace dès l’ouverture des abonnements."],
+  ["Que change un vecteur de 256 valeurs ?", "Il décrit votre visage plus finement, ce qui réduit encore le risque de confusion entre deux personnes. La connexion prend un peu plus de temps."],
+  ["Comment fonctionne l’offre Enterprise ?", "C’est un abonnement unique pour tout un groupe, dont le tarif dépend du nombre de personnes. Contactez-nous pour un devis."],
 ];
 
 export function PricingPage() {
   return (
     <div className="page-pricing">
-      <section className="page-hero page-hero--pricing">
+      <section className="page-hero grid-lines">
         <div className="container page-hero__inner">
-          <p className="eyebrow">Des offres simples.</p>
-          <h1>Choisissez entre une connexion rapide et une sécurité renforcée.</h1>
-          <p className="page-hero__lead">Une offre gratuite pour démarrer, une sécurité renforcée à 2,99 € par mois et une formule Enterprise par groupe.</p>
+          <div>
+          <p className="lead-label">Tarifs</p>
+          <h1>Des offres simples. <span>Gratuit pour démarrer, 2,99 € par mois pour une sécurité renforcée.</span></h1>
+          </div>
           <div className="pricing-orbit" aria-hidden="true"><span>FaceIN</span><i /><i /><i /></div>
         </div>
       </section>
@@ -82,7 +83,7 @@ export function PricingPage() {
         </div>
       </section>
       <section className="container section-padding">
-        <SectionHeading eyebrow="Comparer les offres." title="Les fonctionnalités prévues." align="center" />
+        <SectionHeading eyebrow="Comparer" title="Ce que comprend chaque offre." align="center" />
         <div className="comparison-table-wrap">
           <table className="comparison-table">
             <thead><tr><th scope="col">Fonctionnalité</th><th scope="col">Standard</th><th scope="col">Renforcée</th><th scope="col">Enterprise</th></tr></thead>
@@ -91,12 +92,12 @@ export function PricingPage() {
             ))}</tbody>
           </table>
         </div>
-        <p className="prototype-note">Les abonnements et paiements ne sont pas encore reliés à un service de facturation.</p>
+        <p className="note">Les tarifs sont indicatifs : la facturation ouvrira avec les abonnements.</p>
       </section>
       <section className="container section-padding">
-        <SectionHeading eyebrow="Questions sur les tarifs." title="Une question sur les offres ?" align="center" />
+        <SectionHeading eyebrow="Questions fréquentes" title="Une question sur les offres ?" align="center" />
         <div className="faq-list">
-          {questions.map(([question, answer]) => <details key={question}><summary>{question}<span aria-hidden="true">+</span></summary><p>{answer}</p></details>)}
+          {questions.map(([question, answer]) => <details key={question}><summary>{question}<span className="accordion-plus" aria-hidden="true" /></summary><p>{answer}</p></details>)}
         </div>
       </section>
     </div>

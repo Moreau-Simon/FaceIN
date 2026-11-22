@@ -107,37 +107,3 @@ export function ProofRays() {
     </svg>
   );
 }
-
-export function NetworkSphere() {
-  const dots = Array.from({ length: 100 }, (_, index) => {
-    const row = Math.floor(index / 10);
-    const column = index % 10;
-    const offset = row % 2 ? 5 : 0;
-    const x = 25 + column * 10 + offset;
-    const y = 16 + row * 8;
-    const distance = Math.hypot(x - 70, y - 53);
-    return { x, y, opacity: Math.max(0.18, 1 - distance / 80) };
-  });
-
-  return (
-    <svg className="network-sphere" viewBox="0 0 150 110" aria-hidden="true">
-      {dots.map((dot, index) => (
-        <circle
-          key={index}
-          cx={dot.x}
-          cy={dot.y}
-          r="1.35"
-          fill={index % 7 === 0 ? "#fd7c9f" : "#7868f6"}
-          opacity={dot.opacity}
-        />
-      ))}
-      <path d="m47 45 47 15-26 24-21-39Z" fill="none" stroke="#a79cff" strokeDasharray="2 3" />
-      <circle cx="47" cy="45" r="5.5" fill="white" stroke="#6b5bff" strokeWidth="1.5" />
-      <circle cx="94" cy="60" r="5.5" fill="white" stroke="#6b5bff" strokeWidth="1.5" />
-      <circle cx="68" cy="84" r="5.5" fill="white" stroke="#6b5bff" strokeWidth="1.5" />
-      <text x="47" y="47" textAnchor="middle" fontSize="5" fill="#5545df">A</text>
-      <text x="94" y="62" textAnchor="middle" fontSize="5" fill="#5545df">B</text>
-      <text x="68" y="86" textAnchor="middle" fontSize="5" fill="#5545df">C</text>
-    </svg>
-  );
-}

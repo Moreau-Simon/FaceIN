@@ -9,8 +9,8 @@ const integrationSteps = [
     searchTerms: "identifiant clé serveur",
     content: (
       <>
-        <p>Dans votre espace, ajoutez votre site. Vous obtenez un identifiant de service et une clé.</p>
-        <p className="security-callout"><strong>Gardez votre clé sur votre serveur.</strong> Ne l’ajoutez jamais au code de la page.</p>
+        <p>Depuis votre espace, ajoutez votre site. Vous obtenez un identifiant de service et une clé secrète.</p>
+        <p className="callout callout--warn"><strong>Gardez votre clé sur votre serveur.</strong> Ne l’ajoutez jamais au code de la page.</p>
       </>
     ),
   },
@@ -31,8 +31,8 @@ const integrationSteps = [
     searchTerms: "HTML data-facein-login service ID",
     content: (
       <>
-        <p>Voici le rendu :</p>
-        <div className="integration-button-preview"><span className="mini-brand">F</span> Se connecter avec FaceIN</div>
+        <p>Placez le bouton où vous le souhaitez. Voici le rendu :</p>
+        <div className="integration-button-preview"><span className="facein-button">Se connecter avec FaceIN</span></div>
         <CodeBlock
           label="HTML"
           code={'<button data-facein-login\n  data-service-id="VOTRE_ID">\n  Se connecter avec FaceIN\n</button>'}
@@ -46,9 +46,9 @@ const integrationSteps = [
     searchTerms: "Python JWT token serveur",
     content: (
       <>
-        <p>Vérifiez le jeton sur votre serveur avant d’ouvrir la session.</p>
+        <p>FaceIN vous transmet un jeton JWT signé, valable une heure. Vérifiez-le sur votre serveur avant d’ouvrir la session.</p>
         <CodeBlock
-          label="Python · exemple de la maquette"
+          label="Python"
           code={'from facein_verify import verify_token\n\nuser = verify_token(token, service_id="VOTRE_ID")\nif user.valid:\n    open_session(user.id)'}
         />
       </>
@@ -67,9 +67,7 @@ const documentationIndex = [
   "Ajouter le bouton",
   "Vérifier le jeton",
   "Ressources",
-  "Site de démonstration",
-  "Télécharger le SDK",
-  "Questions fréquentes",
+  "Tester le parcours",
 ];
 
 export function IntegrationPage() {
@@ -84,17 +82,18 @@ export function IntegrationPage() {
 
   return (
     <div className="page-integration">
-      <section className="page-hero page-hero--integration">
+      <section className="page-hero page-hero--single grid-lines">
         <div className="container page-hero__inner">
-          <p className="eyebrow">Guide d’intégration</p>
-          <h1>Intégrer FaceIN à votre site</h1>
-          <p className="page-hero__lead">Vous ne recevez jamais de donnée biométrique : seulement un jeton.</p>
+          <div>
+          <p className="lead-label">Guide d’intégration</p>
+          <h1>Intégrez FaceIN à votre site. <span>Vous ne recevez jamais de donnée biométrique, seulement un jeton.</span></h1>
           <div className="requirements" id="requirements">
             <span><i>✓</i> Un compte FaceIN</span>
             <span><i>✓</i> Un site en HTTPS (la caméra ne s’active pas en HTTP)</span>
             <span><i>✓</i> Un serveur qui peut vérifier un jeton JWT</span>
           </div>
-          <p className="prototype-note">Les exemples ci-dessous sont ceux de la maquette et ne sont pas reliés à un SDK ou à un endpoint opérationnel dans ce dépôt.</p>
+          <p className="note">Le SDK n’est pas encore publié : les extraits ci-dessous présentent l’intégration prévue.</p>
+          </div>
         </div>
       </section>
 
@@ -107,17 +106,17 @@ export function IntegrationPage() {
               <h2>Démarrer</h2><a href="#overview">Vue d’ensemble</a><a href="#requirements">Avant de commencer</a>
               <h2>Intégration</h2>
               {integrationSteps.map((step) => <a key={step.id} href={`#${step.id}`}>{step.title.replace(/^\d+\.\s/, "")}</a>)}
-              <h2>Ressources</h2><a href="#resources">Site de démonstration</a><a href="#resources">Télécharger le SDK</a><a href="#resources">Questions fréquentes</a>
+              <h2>Ressources</h2><a href="#resources">Tester le parcours</a>
             </nav>
           </aside>
           <div className="docs-content">
             <div id="overview" className="docs-intro">
-              <p className="eyebrow">Démarrer · Vue d’ensemble</p>
+              <p className="lead-label">Vue d’ensemble</p>
               <h2>Avant de commencer</h2>
-              <p>Un compte FaceIN, un site en HTTPS (la caméra ne s’active pas en HTTP), et un serveur qui peut vérifier un jeton JWT.</p>
+              <p>Il vous faut un compte FaceIN, un site en HTTPS (la caméra ne s’active pas en HTTP) et un serveur capable de vérifier un jeton JWT.</p>
             </div>
             {filteredSteps.length === 0 ? (
-              <p className="search-empty" role="status">Aucune étape ne correspond à « {query} ».</p>
+              <p className="empty-state" role="status">Aucune étape ne correspond à « {query} ».</p>
             ) : filteredSteps.map((step, index) => (
               <Reveal className="docs-step" key={step.id} id={step.id} delay={index * 0.035}>
                 <span className="docs-step__number">{step.title.slice(0, 1)}</span>
@@ -125,11 +124,10 @@ export function IntegrationPage() {
               </Reveal>
             ))}
             <Reveal className="docs-next-step" id="resources">
-              <span className="eyebrow">Étape suivante</span>
-              <h2>Tester sur le site de démonstration</h2>
-              <p>Consultez le parcours de démonstration; aucune vérification réelle n’est effectuée ici.</p>
-              <a className="button button-primary" href="connexion.html">Ouvrir la démo <span aria-hidden="true">→</span></a>
-              <p className="prototype-note">Aucun SDK téléchargeable n’est fourni dans ce dépôt.</p>
+              <span className="lead-label">Étape suivante</span>
+              <h2>Testez le parcours vous-même</h2>
+              <p>Créez une identité et connectez-vous pour voir exactement ce que vivront vos utilisateurs.</p>
+              <a className="button button-primary" href="connexion.html#register">Essayer le parcours <span className="button-arrow" aria-hidden="true" /></a>
               <div className="resource-grid">
                 <a href="#script"><b>HTML</b><span>Ajouter le script</span></a>
                 <a href="#button"><b>HTML</b><span>Ajouter le bouton</span></a>

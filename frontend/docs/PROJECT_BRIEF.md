@@ -1,7 +1,7 @@
 # Brief projet FaceIN
 
 - **Statut** : validé pour implémentation frontend
-- **Dernière mise à jour** : 2026-11-16
+- **Dernière mise à jour** : 2026-11-22
 
 ## Contexte
 
@@ -83,3 +83,9 @@ Confiant, précis et transparent. Utiliser les captures fournies comme référen
 - Les nombres de connexion, tableaux et éléments d'interface des captures sont des exemples de présentation, pas des données temps réel.
 - L'aperçu caméra n'effectue ni extraction de caractéristiques, ni persistance, ni envoi.
 - Les textes tarifaires et certaines garanties nécessitent une validation produit/légale.
+
+## Évolution du 2026-11-22
+
+- Connexion réelle reprise de `capture_camera_photo` (inscription, test de présence, preuve, jeton).
+- Nouvel espace client `espace.html` : connexions en cours et historique avec les sites partenaires (journal local en attendant une route API).
+- Refonte visuelle et rédactionnelle de toutes les pages ; widgets d’accueil retravaillés façon stripe.com.

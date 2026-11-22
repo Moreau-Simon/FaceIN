@@ -22,12 +22,21 @@ npm run preview
 Pages servies :
 
 - `/` — accueil
-- `/connexion.html` — démonstration locale d’inscription/connexion
+- `/connexion.html` — inscription et connexion par le visage
+- `/espace.html` — espace client (connexions en cours et historique), accessible une fois connecté
 - `/comment-ca-marche.html` — explication du parcours prévu
 - `/integrer.html` — guide et exemples d’intégration
 - `/tarif.html` — offres provisoires
 
-Le parcours d’inscription n’envoie aucune authentification. L’aperçu caméra ne démarre qu’après une action explicite, reste local et n’effectue aucune reconnaissance. Le guide d’intégration présente des exemples illustratifs non reliés à un SDK ou à un endpoint disponible dans ce dépôt. Les chiffres et tableaux d’interface sont également signalés comme illustratifs.
+La connexion reprend le fonctionnement de la branche `capture_camera_photo` : visage analysé dans le navigateur (face-api.js), vecteur gardé dans IndexedDB, test de présence imposé par le serveur, preuve Groth16 générée localement, puis jeton JWT délivré par l’API Gateway.
+
+Pour tester la connexion, démarrer l’API de la branche `capture_camera_photo` (port 8000). Une autre adresse peut être fournie au build :
+
+```bash
+VITE_FACEIN_API_URL=https://api.exemple.fr/api npm run build
+```
+
+La caméra exige HTTPS ou `localhost`. Le guide d’intégration présente des exemples illustratifs non reliés à un SDK ou à un endpoint disponible dans ce dépôt. Les chiffres et tableaux d’interface sont également signalés comme illustratifs.
 
 Structure de l’application : `src/` contient les composants React et les pages; `styles/site.css` définit le design responsive; `index.html` et les quatre autres entrées HTML sont compilées dans `dist/`. Les fragments `accueil.js`, `connexion.js`, `comment-ca-marche.js`, `integrer.js` et `tarif.js` restent les références de contenu et ne sont pas des points d’entrée de l’application.
 
