@@ -458,6 +458,24 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
                 register(req)
             self.assertEqual(ctx.exception.status_code, 500)
 
+    def test_register_propagates_to_nodes(self):
+        from routes.register import register
+
+        with patch("routes.register.propagate_commitment_to_nodes") as mock_prop:
+            mock_prop.return_value = {"quorum": True, "majority": "3/3"}
+            req = RegisterRequest(user_id="new_user2", commitment="12345678901234567890")
+            res = register(req)
+            self.assertTrue(res.success)
+            mock_prop.assert_called_once_with("new_user2", "12345678901234567890")
+
+    def test_register_success_even_if_propagation_fails(self):
+        from routes.register import register
+
+        with patch("routes.register.propagate_commitment_to_nodes", side_effect=Exception("gRPC down")):
+            req = RegisterRequest(user_id="new_user3", commitment="12345678901234567890")
+            res = register(req)
+            self.assertTrue(res.success)  # propagation non bloquante
+
     def test_get_nonce_success(self):
         from routes.nonce import get_nonce
 

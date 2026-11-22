@@ -10,10 +10,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 try:
     from models import RegisterRequest, RegisterResponse
+    from services.grpc_bridge import propagate_commitment_to_nodes
     from services.rate_limiter import enforce_rate_limit
     from services.store import save_commitment, user_exists
 except ImportError:
     from api.models import RegisterRequest, RegisterResponse
+    from api.services.grpc_bridge import propagate_commitment_to_nodes
     from api.services.rate_limiter import enforce_rate_limit
     from api.services.store import save_commitment, user_exists
 
@@ -50,6 +52,28 @@ def register(payload: RegisterRequest, request: Request = None) -> RegisterRespo
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erreur interne lors de l'enregistrement.",
+        )
+
+    # Propagation explicite et sécurisée vers le réseau de nœuds de vérification
+    try:
+        prop_res = propagate_commitment_to_nodes(user_id, commitment)
+        if prop_res.get("quorum"):
+            logger.info(
+                "[%s] Engagement propagé avec succès aux nœuds (%s)",
+                user_id,
+                prop_res.get("majority"),
+            )
+        else:
+            logger.warning(
+                "[%s] Quorum de propagation non atteint aux nœuds (%s) - sera synchronisé au rattrapage",
+                user_id,
+                prop_res.get("majority"),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[%s] Erreur non bloquante lors de la propagation gRPC aux nœuds : %s",
+            user_id,
+            exc,
         )
 
     logger.info("Nouvel utilisateur enregistré avec succès : '%s'", user_id)

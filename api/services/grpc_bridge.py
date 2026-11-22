@@ -376,3 +376,106 @@ def request_nonce_from_node(
 
     logger.warning("Aucun noeud gRPC n'a pu délivrer de nonce.")
     return None, None
+
+
+def propagate_commitment_to_nodes(
+    user_id: str,
+    commitment: str,
+    nodes: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """
+    Propage l'engagement enregistré aux 3 nœuds de vérification gRPC.
+    Exige la confirmation d'au moins 2/3 des nœuds (quorum) pour considérer la propagation réussie.
+    """
+    target_nodes = nodes or DEFAULT_NODES
+
+    # Si gRPC n'est pas disponible (environnement de test / local sans protobuf)
+    if grpc is None or verification_pb2 is None or verification_pb2_grpc is None:
+        logger.warning("Protobuf/gRPC non disponible. Simulation de propagation réussie.")
+        return {
+            "success": True,
+            "quorum": True,
+            "confirmations": {n["id"]: True for n in target_nodes},
+            "majority": f"{len(target_nodes)}/{len(target_nodes)}",
+        }
+
+    confirmations: dict[str, bool] = {}
+    now_ms = int(time.time() * 1000)
+
+    for node in target_nodes:
+        node_id = node["id"]
+        target = f"{node['host']}:{node['port']}"
+        try:
+            channel = _creer_canal(target)
+            stub = verification_pb2_grpc.VerificationServiceStub(channel)
+            demande = verification_pb2.DemandeEnregistrementEngagement(
+                utilisateur_id=user_id,
+                commitment=commitment,
+                timestamp=now_ms,
+            )
+            reponse = stub.EnregistrerEngagement(demande, timeout=TIMEOUT_NOEUD_SECONDES)
+            confirmations[node_id] = bool(reponse and reponse.succes)
+            if confirmations[node_id]:
+                logger.info("[%s] Engagement propagé avec succès pour '%s'", node_id, user_id)
+            else:
+                logger.warning("[%s] Nœud a rejeté l'engagement pour '%s'", node_id, user_id)
+        except Exception as exc:
+            logger.warning("[%s] Échec de propagation vers %s : %s", node_id, target, exc)
+            confirmations[node_id] = False
+
+    nb_succes = sum(1 for v in confirmations.values() if v)
+    quorum_atteint = nb_succes >= SEUIL_MAJORITE
+
+    return {
+        "success": quorum_atteint,
+        "quorum": quorum_atteint,
+        "confirmations": confirmations,
+        "majority": f"{nb_succes}/{len(target_nodes)}",
+    }
+
+
+def propagate_revocation_to_nodes(
+    user_id: str,
+    raison: str = "",
+    nodes: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """Propage la révocation d'un engagement aux 3 nœuds gRPC."""
+    target_nodes = nodes or DEFAULT_NODES
+
+    if grpc is None or verification_pb2 is None or verification_pb2_grpc is None:
+        logger.warning("Protobuf/gRPC non disponible. Simulation de révocation réussie.")
+        return {
+            "success": True,
+            "quorum": True,
+            "confirmations": {n["id"]: True for n in target_nodes},
+            "majority": f"{len(target_nodes)}/{len(target_nodes)}",
+        }
+
+    confirmations: dict[str, bool] = {}
+    now_ms = int(time.time() * 1000)
+
+    for node in target_nodes:
+        node_id = node["id"]
+        target = f"{node['host']}:{node['port']}"
+        try:
+            channel = _creer_canal(target)
+            stub = verification_pb2_grpc.VerificationServiceStub(channel)
+            demande = verification_pb2.DemandeRevocationEngagement(
+                utilisateur_id=user_id,
+                raison=raison,
+                timestamp=now_ms,
+            )
+            reponse = stub.RevoquerEngagement(demande, timeout=TIMEOUT_NOEUD_SECONDES)
+            confirmations[node_id] = bool(reponse and reponse.succes)
+        except Exception as exc:
+            logger.warning("[%s] Échec de révocation vers %s : %s", node_id, target, exc)
+            confirmations[node_id] = False
+
+    nb_succes = sum(1 for v in confirmations.values() if v)
+    return {
+        "success": nb_succes >= SEUIL_MAJORITE,
+        "quorum": nb_succes >= SEUIL_MAJORITE,
+        "confirmations": confirmations,
+        "majority": f"{nb_succes}/{len(target_nodes)}",
+    }
+

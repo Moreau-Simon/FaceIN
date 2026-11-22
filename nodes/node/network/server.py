@@ -5,6 +5,7 @@ le consensus de vote et la vérification des preuves cryptographiques ZKP.
 
 import logging
 import os
+import time
 import uuid
 from concurrent import futures
 from pathlib import Path
@@ -213,6 +214,119 @@ class VerificationService(verification_pb2_grpc.VerificationServiceServicer):
         return verification_pb2.ReponseVerification(
             accepte=True, token=self._fabriquer_token(request.utilisateur_id),
             score_anomalie=0)
+
+    def EnregistrerEngagement(self, request, context):
+        """Enregistre ou met à jour de façon idempotente l'engagement d'un utilisateur."""
+        if not request.utilisateur_id or not request.commitment:
+            if context:
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, "utilisateur_id et commitment requis")
+            return verification_pb2.ReponseEnregistrementEngagement(
+                succes=False, message="utilisateur_id et commitment requis"
+            )
+
+        if self._store is None:
+            if context:
+                context.abort(grpc.StatusCode.UNAVAILABLE, "Magasin d'engagements non configuré")
+            return verification_pb2.ReponseEnregistrementEngagement(
+                succes=False, message="Magasin d'engagements non configuré"
+            )
+
+        ts = (
+            float(request.timestamp) / 1000.0
+            if request.timestamp > 100_000_000_000
+            else float(request.timestamp or time.time())
+        )
+        self._store.save(
+            user_id=request.utilisateur_id,
+            commitment=request.commitment,
+            timestamp=ts,
+            version=request.version or None,
+        )
+        logger.info(
+            "[%s] Engagement enregistré pour '%s'",
+            self.node_id,
+            request.utilisateur_id,
+        )
+        return verification_pb2.ReponseEnregistrementEngagement(
+            succes=True,
+            message="Engagement enregistré avec succès",
+        )
+
+    def RevoquerEngagement(self, request, context):
+        """Révoque de façon idempotente l'engagement d'un utilisateur."""
+        if not request.utilisateur_id:
+            if context:
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, "utilisateur_id requis")
+            return verification_pb2.ReponseRevocationEngagement(
+                succes=False, message="utilisateur_id requis"
+            )
+
+        if self._store is None:
+            if context:
+                context.abort(grpc.StatusCode.UNAVAILABLE, "Magasin d'engagements non configuré")
+            return verification_pb2.ReponseRevocationEngagement(
+                succes=False, message="Magasin d'engagements non configuré"
+            )
+
+        ts = (
+            float(request.timestamp) / 1000.0
+            if request.timestamp > 100_000_000_000
+            else float(request.timestamp or time.time())
+        )
+        ok = self._store.revoke(
+            user_id=request.utilisateur_id,
+            raison=request.raison or "",
+            timestamp=ts,
+        )
+        logger.info(
+            "[%s] Révocation traitée pour '%s' (trouvé=%s)",
+            self.node_id,
+            request.utilisateur_id,
+            ok,
+        )
+        return verification_pb2.ReponseRevocationEngagement(
+            succes=True,
+            message="Engagement révoqué avec succès",
+        )
+
+    def SynchroniserEngagements(self, request, context):
+        """Synchronise un lot d'engagements pour le rattrapage d'état (idempotent)."""
+        if self._store is None:
+            if context:
+                context.abort(grpc.StatusCode.UNAVAILABLE, "Magasin d'engagements non configuré")
+            return verification_pb2.ReponseSyncEngagements(
+                succes=False, nb_synchronises=0, message="Magasin non disponible"
+            )
+
+        entries = []
+        for e in request.engagements:
+            ts = (
+                float(e.timestamp) / 1000.0
+                if e.timestamp > 100_000_000_000
+                else float(e.timestamp or time.time())
+            )
+            entries.append(
+                {
+                    "utilisateur_id": e.utilisateur_id,
+                    "commitment": e.commitment,
+                    "statut": e.statut or "actif",
+                    "timestamp": ts,
+                    "version": e.version or 1,
+                    "raison": e.raison or "",
+                }
+            )
+
+        nb_sync = self._store.sync_batch(entries)
+        logger.info(
+            "[%s] Synchronisation terminée : %d entrées mises à jour",
+            self.node_id,
+            nb_sync,
+        )
+        return verification_pb2.ReponseSyncEngagements(
+            succes=True,
+            nb_synchronises=nb_sync,
+            message=f"{nb_sync} engagements synchronisés",
+        )
 
 def start_grpc_server(
     node_id,

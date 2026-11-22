@@ -44,10 +44,12 @@ services:
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/node-a.crt
       - TLS_KEY=/app/certs/node-a.key
+      - ENGAGEMENTS_STORE_FILE=/app/data/engagements.json
     volumes:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-a.crt:/app/certs/node-a.crt:ro
       - ./certs/node-a.key:/app/certs/node-a.key:ro
+      - node_a_data:/app/data
     networks:
       - reseau-verification
 
@@ -66,10 +68,12 @@ services:
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/node-b.crt
       - TLS_KEY=/app/certs/node-b.key
+      - ENGAGEMENTS_STORE_FILE=/app/data/engagements.json
     volumes:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-b.crt:/app/certs/node-b.crt:ro
       - ./certs/node-b.key:/app/certs/node-b.key:ro
+      - node_b_data:/app/data
     networks:
       - reseau-verification
 
@@ -88,10 +92,12 @@ services:
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/node-c.crt
       - TLS_KEY=/app/certs/node-c.key
+      - ENGAGEMENTS_STORE_FILE=/app/data/engagements.json
     volumes:
       - ${TLS_CA_CERT_HOST_PATH:-./nodes/infra/tls/ca.crt}:/app/certs/ca.crt:ro
       - ./certs/node-c.crt:/app/certs/node-c.crt:ro
       - ./certs/node-c.key:/app/certs/node-c.key:ro
+      - node_c_data:/app/data
     networks:
       - reseau-verification
 
@@ -148,3 +154,6 @@ networks:
 
 volumes:
   postgres_data:
+  node_a_data:
+  node_b_data:
+  node_c_data:

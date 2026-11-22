@@ -14,6 +14,15 @@ service VerificationService {
 
   // Envoie la preuve ZKP Groth16 et les signaux publics générés côté client pour vérification
   rpc VerifierPreuve (DemandeVerification) returns (ReponseVerification);
+
+  // Enregistre ou met à jour un engagement de référence (propagation depuis l'API Gateway)
+  rpc EnregistrerEngagement (DemandeEnregistrementEngagement) returns (ReponseEnregistrementEngagement);
+
+  // Révoque un engagement de référence (propagation depuis l'API Gateway)
+  rpc RevoquerEngagement (DemandeRevocationEngagement) returns (ReponseRevocationEngagement);
+
+  // Synchronise un lot d'engagements (rattrapage de nœud post-redémarrage)
+  rpc SynchroniserEngagements (DemandeSyncEngagements) returns (ReponseSyncEngagements);
 }
 
 // Demande de récupération de l'engagement de référence (nom conservé pour rétro-compatibilité)
@@ -71,3 +80,53 @@ message ReponseVerification {
   string token = 3;              // Jeton de session / JWT (fourni uniquement si accepté)
   int64 score_anomalie = 4;      // Score de détection de fraude / anomalie
 }
+
+// Demande d'enregistrement ou de mise à jour d'un engagement de référence
+message DemandeEnregistrementEngagement {
+  string utilisateur_id = 1;
+  string commitment = 2;
+  int64 timestamp = 3;
+  int64 version = 4;
+}
+
+// Réponse d'enregistrement d'un engagement
+message ReponseEnregistrementEngagement {
+  bool succes = 1;
+  string message = 2;
+}
+
+// Demande de révocation d'un engagement
+message DemandeRevocationEngagement {
+  string utilisateur_id = 1;
+  string raison = 2;
+  int64 timestamp = 3;
+}
+
+// Réponse de révocation d'un engagement
+message ReponseRevocationEngagement {
+  bool succes = 1;
+  string message = 2;
+}
+
+// Entrée d'engagement pour la synchronisation par lots
+message EntreeEngagementSync {
+  string utilisateur_id = 1;
+  string commitment = 2;
+  string statut = 3; // "actif" ou "revoque"
+  int64 timestamp = 4;
+  int64 version = 5;
+  string raison = 6;
+}
+
+// Demande de synchronisation d'engagements (rattrapage)
+message DemandeSyncEngagements {
+  repeated EntreeEngagementSync engagements = 1;
+}
+
+// Réponse de synchronisation d'engagements
+message ReponseSyncEngagements {
+  bool succes = 1;
+  int32 nb_synchronises = 2;
+  string message = 3;
+}
+
