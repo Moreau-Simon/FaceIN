@@ -19,7 +19,7 @@ export function App() {
   }, [route.fileName, route.title]);
 
   return (
-    <SiteShell>
+    <SiteShell variant={route.variant}>
       <PageComponent />
     </SiteShell>
   );

@@ -2,6 +2,7 @@
 export const pageFiles = {
   home: "index.html",
   connection: "connexion.html",
+  espace: "espace.html",
   howItWorks: "comment-ca-marche.html",
   integration: "integrer.html",
   pricing: "tarif.html",

@@ -3,6 +3,7 @@ import { CommentCaMarchePage } from "../features/how-it-works/CommentCaMarchePag
 import { ConnectionPage } from "../features/connection/ConnectionPage";
 import { HomePage } from "../features/home/HomePage";
 import { IntegrationPage } from "../features/integration/IntegrationPage";
+import { EspacePage } from "../pages/EspacePage";
 import { PricingPage } from "../features/pricing/PricingPage";
 import { pageFiles } from "./navigation";
 
@@ -10,11 +11,13 @@ export type Route = {
   fileName: string;
   title: string;
   component: ComponentType;
+  variant?: "default" | "auth";
 };
 
 export const routes: readonly Route[] = [
   { fileName: pageFiles.home, title: "FaceIN — Prouver son identité sans exposer sa biométrie", component: HomePage },
-  { fileName: pageFiles.connection, title: "Démonstration de connexion — FaceIN", component: ConnectionPage },
+  { fileName: pageFiles.connection, title: "Créer un compte ou se connecter — FaceIN", component: ConnectionPage, variant: "auth" },
+  { fileName: pageFiles.espace, title: "Mon espace — FaceIN", component: EspacePage },
   { fileName: pageFiles.howItWorks, title: "Fonctionnement envisagé — FaceIN", component: CommentCaMarchePage },
   { fileName: pageFiles.integration, title: "Guide d’intégration — FaceIN", component: IntegrationPage },
   { fileName: pageFiles.pricing, title: "Offres envisagées — FaceIN", component: PricingPage },

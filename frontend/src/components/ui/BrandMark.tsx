@@ -1,22 +1,9 @@
-export function BrandMark() {
+/** Symbole FaceIN : deux portes hexagonales complémentaires (logo officiel). */
+export function BrandMark({ inverted = false }: { inverted?: boolean }) {
   return (
-    <svg
-      className="brand-mark"
-      viewBox="0 0 32 32"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="M16 2.8 27.3 9.2v13.6L16 29.2 4.7 22.8V9.2L16 2.8Z"
-        fill="currentColor"
-      />
-      <path
-        d="m16 8.1 6.7 3.8v8.2L16 23.9l-6.7-3.8v-8.2L16 8.1Z"
-        fill="none"
-        stroke="white"
-        strokeWidth="1.8"
-      />
-      <path d="M16 12v8m-3.5-4h7" stroke="white" strokeWidth="1.8" />
+    <svg className="brand-mark" viewBox="56 30 281 317" aria-hidden="true" focusable="false">
+      <path d="M190 37L256 73L125 150V224L192 264L128 301L63 264V109Z" fill={inverted ? "#FFFFFF" : "#0D1B31"} />
+      <path d="M266 80L330 116V267L203 340L139 303L270 228V152L205 115Z" fill="#3369F6" />
     </svg>
   );
 }

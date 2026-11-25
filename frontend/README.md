@@ -1,6 +1,8 @@
 # FaceIN — frontend React
 
-Application multipage en React et TypeScript, construite avec Vite. Les entrées HTML conservent les URLs statiques des cinq maquettes; aucun routeur serveur n’est nécessaire.
+Application multipage en React et TypeScript, construite avec Vite. Les entrées HTML conservent les URLs statiques; aucun routeur serveur n’est nécessaire.
+
+Le parcours biométrique et l’espace client cloud sont présents avec leurs composants, modèles et circuit, mais leurs modules d’exécution `src/lib/facein/` sont absents de cet espace de travail et ignorés par Git. Le build et les parcours ne sont donc pas validables tant que ces modules ne sont pas fournis.
 
 ## Lancer l’application
 
@@ -24,12 +26,21 @@ Pour le backlog restant, les limites du prototype et les étapes détaillées de
 Pages servies :
 
 - `/` — accueil
-- `/connexion.html` — démonstration locale d’inscription/connexion
+- `/connexion.html` — inscription et connexion par le visage
+- `/espace.html` — espace client (connexions en cours et historique), accessible une fois connecté
 - `/comment-ca-marche.html` — explication du parcours prévu
 - `/integrer.html` — guide et exemples d’intégration
 - `/tarif.html` — offres provisoires
 
-Le parcours d’inscription n’envoie aucune authentification. L’aperçu caméra ne démarre qu’après une action explicite, reste local et n’effectue aucune reconnaissance. Le guide d’intégration présente des exemples illustratifs non reliés à un SDK ou à un endpoint disponible dans ce dépôt. Les chiffres et tableaux d’interface sont également signalés comme illustratifs.
+La connexion reprend l’interface et le flux prévus par la branche `capture_camera_photo` : analyse du visage dans le navigateur, coffre local, preuve Groth16 et API Gateway. Ces étapes ne doivent pas être considérées comme opérationnelles tant que `src/lib/facein/` n’est pas disponible et que le build et les tests n’ont pas été relancés.
+
+Pour tester la connexion, démarrer l’API de la branche `capture_camera_photo` (port 8000). Une autre adresse peut être fournie au build :
+
+```bash
+VITE_FACEIN_API_URL=https://api.exemple.fr/api npm run build
+```
+
+La caméra exige HTTPS ou `localhost`. Le guide d’intégration présente des exemples illustratifs non reliés à un SDK ou à un endpoint disponible dans ce dépôt. Les chiffres et tableaux d’interface sont également signalés comme illustratifs.
 
 ## Architecture du code
 
@@ -46,11 +57,13 @@ src/
 │   ├── how-it-works/     # explication du fonctionnement prévu
 │   ├── integration/      # guide d’intégration
 │   └── pricing/          # offres et comparatif
+├── pages/                # espace client
+├── lib/facein/           # dépendances d’exécution locales, ignorées par Git
 ├── styles/site.css       # design system (tokens + @layer)
 └── main.tsx              # point d’entrée React
 ```
 
-Le modèle multipage est conservé : `index.html` et les quatre autres entrées HTML sont compilées dans `dist/`. Les URLs internes et les libellés de navigation sont centralisés dans `src/app/navigation.ts`; la table des pages (titre + composant) dans `src/app/routes.ts`. Le design system reste dans une seule feuille CSS organisée en couches (`reset`, `base`, `layout`, `components`, `pages`, `responsive`).
+Le modèle multipage est conservé : les six entrées HTML sont compilées dans `dist/`. Les URLs internes et les libellés de navigation sont centralisés dans `src/app/navigation.ts`; la table des pages (titre + composant) dans `src/app/routes.ts`. Le design system reste dans une seule feuille CSS organisée en couches (`reset`, `base`, `layout`, `components`, `pages`, `responsive`).
 
 ## Environnement OpenCode — Frontend Premium
 

@@ -4,29 +4,31 @@ Ce document explique comment récupérer et lancer le frontend, ce qu’il conti
 
 ## État actuel
 
-Le dossier `frontend/` contient une application multipage construite avec React, TypeScript et Vite. C’est un prototype d’interface : les pages et les démonstrations locales sont présentes, mais le dépôt ne fournit ni API FaceIN ni service de production.
+Le dossier `frontend/` contient une application multipage construite avec React, TypeScript et Vite. Le parcours biométrique et l’espace client de la branche cloud sont portés, avec leurs assets, mais les modules d’exécution `src/lib/facein/` sont absents de cet espace de travail et ignorés par Git. Le build et les parcours ne sont pas validables tant que ces modules ne sont pas récupérés. Le dépôt ne fournit par ailleurs ni service de production ni vérification bout en bout.
 
 La structure principale est organisée ainsi :
 
 ```text
 frontend/
-├── index.html, connexion.html, comment-ca-marche.html, integrer.html, tarif.html
+├── index.html, connexion.html, espace.html, comment-ca-marche.html, integrer.html, tarif.html
 ├── src/
 │   ├── app/                 # composition, navigation et table des pages
 │   ├── components/          # composants partagés (layout, UI, visuels)
 │   ├── features/            # accueil, connexion, fonctionnement, intégration, tarifs
+│   ├── pages/               # espace client
 │   └── styles/site.css      # styles et design system
 ├── docs/                    # décisions, plan, qualité et guides
 ├── package.json
 └── package-lock.json
 ```
 
-Les cinq entrées HTML conservent leurs URL :
+Les six entrées HTML conservent leurs URL :
 
 | Page | URL locale | État |
 |---|---|---|
 | Accueil | `/` | Présentation du projet et démonstrations visuelles |
-| Connexion | `/connexion.html` | Parcours de démonstration, sans authentification réelle |
+| Connexion | `/connexion.html` | Interface cloud portée ; modules d’exécution manquants |
+| Espace client | `/espace.html` | Historique local prévu ; modules d’exécution manquants |
 | Fonctionnement | `/comment-ca-marche.html` | Description du fonctionnement envisagé |
 | Intégration | `/integrer.html` | Guide et exemples illustratifs, sans SDK ou endpoint disponible |
 | Offres | `/tarif.html` | Tarifs et offres indicatifs, sans facturation connectée |
@@ -39,9 +41,9 @@ Les éléments ci-dessous sont un backlog proposé, pas des fonctionnalités dé
 
 ### Priorité 0 — définir et connecter les services réels
 
-1. **Écrire les contrats d’API.** Définir les endpoints, formats de requête/réponse, erreurs, délais, authentification, versionnement et environnements de test. Documenter les responsabilités du frontend et du backend.
-2. **Implémenter l’authentification.** Relier les formulaires à un service, gérer les états de chargement, les erreurs, les sessions, la déconnexion et les réponses serveur. Ne pas traiter la validation locale actuelle comme une connexion effective.
-3. **Préciser le parcours biométrique et la preuve.** Définir où et comment les données sont traitées, ce qui est transmis, la durée de conservation, la révocation et les consentements. Le prototype caméra n’effectue ni reconnaissance faciale ni vérification cryptographique réelle. Ne revendiquer ces propriétés qu’après implémentation et vérification.
+1. **Récupérer les modules FaceIN locaux.** Le code cloud importe `src/lib/facein/`, absent de cet espace de travail et ignoré par Git. Fournir ces modules, vérifier qu’ils ne contiennent aucun secret, puis relancer le typecheck et le build.
+2. **Écrire et vérifier les contrats d’API.** Définir les endpoints, formats de requête/réponse, erreurs, délais, authentification, versionnement et environnements de test. Documenter les responsabilités du frontend et du backend.
+3. **Valider l’authentification et le parcours biométrique.** Vérifier où et comment les données sont traitées, ce qui est transmis, la durée de conservation, la révocation et les consentements. Ne présenter les étapes ni les garanties du parcours cloud comme opérationnelles avant validation bout en bout.
 4. **Rendre le formulaire de contact opérationnel.** Connecter une destination de réception, ajouter la validation serveur et une protection contre les abus, puis afficher des états de succès et d’échec fiables. Aujourd’hui, le formulaire ne transmet pas les messages.
 5. **Connecter les offres à la facturation.** Confirmer les montants, conditions et règles d’abonnement (notamment les offres de groupe/Enterprise), puis intégrer le prestataire de paiement et ses états d’abonnement. Les prix affichés ne déclenchent aucun paiement.
 6. **Fournir le vrai kit d’intégration.** Publier et documenter le SDK, les endpoints et des exemples testés. Les extraits actuels sont illustratifs et ne doivent pas être présentés comme une intégration utilisable.

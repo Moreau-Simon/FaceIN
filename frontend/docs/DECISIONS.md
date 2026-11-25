@@ -5,6 +5,11 @@
 ## Format
 `## [AAAA-MM-JJ] Titre` - Contexte - Options considérées - Décision - Raisons - Conséquences.
 
+## [2026-11-25] Fusion du frontend local et cloud
+
+- **Décision** : conserver l’architecture et les pages locales, ajouter les parcours, assets, entrée HTML et route de l’espace client cloud, et garder les textes prudents sur l’état du prototype.
+- **État** : les imports `src/lib/facein/` utilisés par le code cloud sont ignorés par Git et absents de l’espace de travail. Le typecheck échoue donc sur ces modules ; aucun push ni suppression de branche ne doit être effectué avant leur récupération et une validation réussie.
+
 ## [2026-11-17] Remplacement complet du modèle 3D du hero
 
 - **Contexte** : l’utilisateur a jugé le modèle de rubans 3D initial insuffisant et a demandé son remplacement complet, sans SVG au chargement.
@@ -67,7 +72,24 @@
 - **Décision** : garder le build multipage (décision du 2026-11-16), déplacer les composants dans `layout/`, `ui/` et `visuals/`, isoler chaque page dans `features/<nom>/`, extraire les maquettes de l’accueil dans `features/home/components/`, et centraliser URLs (`navigation.ts`) et table des pages (`routes.ts`).
 - **Raisons** : séparation claire des responsabilités, imports prévisibles, suppression des valeurs dupliquées, aucune nouvelle dépendance, comportement et design inchangés.
 - **Conséquences** : ajout ou renommage d’une page = une seule entrée dans `vite.config.ts`, `navigation.ts` et `routes.ts`; le titre et l’URL d’une page restent aussi déclarés dans son fichier HTML pour le référencement et le rendu sans JavaScript.
+## [2026-11-22] Connexion biométrique reprise de `capture_camera_photo`
 
+- **Contexte** : le site devait proposer une vraie connexion, avec le fonctionnement et l’interface de capture de la branche `capture_camera_photo`.
+- **Options** : réimplémenter la biométrie, ou porter en TypeScript les modules existants (`fronted_api/js/*`) et l’interface de `partner-demo`.
+- **Décision** : portage fidèle dans `src/lib/facein/` (mêmes seuils, mêmes routes `/register`, `/nonce`, `/authenticate`). face-api.js 0.22.2, snarkjs 0.7.4 et circomlibjs 0.1.7 sont chargés à la demande depuis jsDelivr, aux mêmes versions que la branche d’origine ; modèles et circuit copiés dans `public/facein/`. L’interface de capture (couronne, médaillon, maillage, glyphe, pastille) est animée avec Motion au lieu de GSAP.
+- **Raisons** : aucun écart de comportement avec le prototype validé, pas de nouvelle dépendance npm lourde, bibliothèques chargées uniquement sur la page de connexion.
+- **Conséquences** : l’API Gateway doit tourner (`VITE_FACEIN_API_URL`, par défaut `http://localhost:8000/api`). Le premier chargement télécharge environ 25 Mo (modèles + circuit).
+
+## [2026-11-22] Espace client alimenté par un journal local
+
+- **Contexte** : l’espace client doit lister les connexions en cours et établies avec les sites partenaires, mais l’API n’expose pas cet historique.
+- **Décision** : `src/lib/facein/connections.ts` enregistre chaque connexion (réussie ou refusée) sur l’appareil. Tant qu’aucune connexion partenaire n’existe, des lignes « Exemple » sont affichées.
+- **Conséquences** : à remplacer par une route API dédiée ; l’interface de l’espace ne changera pas.
+
+## [2026-11-22] Refonte visuelle alignée sur la maquette v3
+
+- **Décision** : police Inter auto-hébergée (`@fontsource-variable/inter`, aucune requête tierce), grille verticale et boutons à flèche animée inspirés de stripe.com, widgets d’accueil interactifs (halo au survol, pression au clic, ouverture agrandie animée depuis la carte).
+- **Conséquences** : `ExperienceWidget` (aperçu de paiement sans rapport avec le produit) et `ZoomableWidget` sont remplacés par `DemoWalkthrough` et `WidgetCard`.
 ## [2026-11-17] Aperçu produit dans un dialogue natif
 
 - **Contexte** : présenter un widget interactif façon produit Stripe sans faire croire à un paiement ou à une authentification opérationnels.

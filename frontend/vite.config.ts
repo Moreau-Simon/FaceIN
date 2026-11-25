@@ -17,6 +17,7 @@ export default defineConfig({
         howItWorks: resolve(root, "comment-ca-marche.html"),
         integration: resolve(root, "integrer.html"),
         pricing: resolve(root, "tarif.html"),
+        espace: resolve(root, "espace.html"),
       },
     },
   },

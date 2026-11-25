@@ -8,28 +8,16 @@ export function ContactForm() {
       className="contact-form"
       onSubmit={(event) => {
         event.preventDefault();
-        setNotice("Le formulaire est valide, mais aucun service d’envoi n’est configuré. Votre message n’a pas été transmis.");
+        setNotice("Votre message est prêt, mais l’envoi n’est pas encore activé. Il n’a pas été transmis.");
       }}
     >
-      <div className="contact-form__fields">
-        <label>
-          Votre nom
-          <input name="name" autoComplete="name" required />
-        </label>
-        <label>
-          Votre adresse e-mail
-          <input name="email" type="email" autoComplete="email" required />
-        </label>
-        <label className="contact-form__message">
-          Votre message
-          <textarea name="message" rows={5} required />
-        </label>
+      <label className="field"><span>Nom</span><input name="name" autoComplete="name" required /></label>
+      <label className="field"><span>Adresse e-mail</span><input name="email" type="email" autoComplete="email" required /></label>
+      <label className="field contact-form__message"><span>Message</span><textarea name="message" rows={5} required /></label>
+      <div className="contact-form__foot">
+        <button className="button button-primary" type="submit">Envoyer le message</button>
+        <p className="contact-form__status" role="status" aria-live="polite">{notice}</p>
       </div>
-      <p className="contact-form__note">
-        Aucun message ne sera envoyé tant qu’un canal de contact n’aura pas été configuré.
-      </p>
-      <button className="button button-primary" type="submit">Préparer le message</button>
-      <p className="contact-form__status" role="status" aria-live="polite">{notice}</p>
     </form>
   );
 }
