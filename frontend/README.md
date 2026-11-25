@@ -19,6 +19,8 @@ npm run build
 npm run preview
 ```
 
+Pour le backlog restant, les limites du prototype et les étapes détaillées de récupération, consulte [le guide de reprise du frontend](./docs/FRONTEND_HANDOFF.md).
+
 Pages servies :
 
 - `/` — accueil
