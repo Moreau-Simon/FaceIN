@@ -1,10 +1,10 @@
 import type { ComponentType } from "react";
-import { CommentCaMarchePage } from "../features/how-it-works/CommentCaMarchePage";
-import { ConnectionPage } from "../features/connection/ConnectionPage";
-import { HomePage } from "../features/home/HomePage";
-import { IntegrationPage } from "../features/integration/IntegrationPage";
-import { EspacePage } from "../pages/EspacePage";
-import { PricingPage } from "../features/pricing/PricingPage";
+import { CommentCaMarchePage } from "../pages/CommentCaMarchePage";
+import { ConnectionUnavailablePage, EspaceUnavailablePage } from "../pages/UnavailableFeaturePage";
+import { IntegrationPage } from "../pages/IntegrationPage";
+import { HomePage } from "../pages/HomePage";
+import { PricingPage } from "../pages/PricingPage";
+import { AboutPage, LegalNoticePage, PrivacyPage, TermsPage } from "../pages/FooterPages";
 import { pageFiles } from "./navigation";
 
 export type Route = {
@@ -16,11 +16,15 @@ export type Route = {
 
 export const routes: readonly Route[] = [
   { fileName: pageFiles.home, title: "FaceIN — Prouver son identité sans exposer sa biométrie", component: HomePage },
-  { fileName: pageFiles.connection, title: "Créer un compte ou se connecter — FaceIN", component: ConnectionPage, variant: "auth" },
-  { fileName: pageFiles.espace, title: "Mon espace — FaceIN", component: EspacePage },
+  { fileName: pageFiles.connection, title: "Créer un compte ou se connecter — FaceIN", component: ConnectionUnavailablePage, variant: "auth" },
+  { fileName: pageFiles.espace, title: "Mon espace — FaceIN", component: EspaceUnavailablePage },
   { fileName: pageFiles.howItWorks, title: "Fonctionnement envisagé — FaceIN", component: CommentCaMarchePage },
   { fileName: pageFiles.integration, title: "Guide d’intégration — FaceIN", component: IntegrationPage },
   { fileName: pageFiles.pricing, title: "Offres envisagées — FaceIN", component: PricingPage },
+  { fileName: pageFiles.about, title: "À propos de FaceIN — Projet étudiant SAE 5", component: AboutPage },
+  { fileName: pageFiles.privacy, title: "Confidentialité — FaceIN (prototype)", component: PrivacyPage },
+  { fileName: pageFiles.terms, title: "Conditions générales — FaceIN", component: TermsPage },
+  { fileName: pageFiles.legalNotice, title: "Mentions légales — FaceIN (à compléter)", component: LegalNoticePage },
 ];
 
 const fallbackRoute = routes[0];

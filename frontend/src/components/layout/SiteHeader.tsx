@@ -1,24 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentRoute } from "../../app/routes";
 import { mainNavigation, pageFiles, pageUrl } from "../../app/navigation";
 import { BrandMark } from "../ui/BrandMark";
-import { Magnet } from "../ui/Magnet";
-import { ShinyText } from "../ui/ShinyText";
 
 export function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const currentPage = getCurrentRoute().fileName;
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("menu-open", menuOpen);
+    return () => document.body.classList.remove("menu-open");
+  }, [menuOpen]);
 
   return (
     <>
       <a className="skip-link" href="#main-content">
         Aller au contenu
       </a>
-      <header className="site-header">
+      <header className={`site-header${scrolled ? " is-scrolled" : ""}`}>
         <div className="site-header__inner">
           <a className="brand" href={pageFiles.home} aria-label="FaceIN — accueil">
             <BrandMark />
-            <span>FaceIN</span>
+            <span>Face<b>IN</b></span>
           </a>
           <button
             className="menu-toggle"
@@ -54,11 +65,9 @@ export function SiteHeader() {
               <a className="button button-outline button-small" href={pageUrl(pageFiles.connection, "login")}>
                 Voir la démo
               </a>
-              <Magnet strength={0.28}>
-                <a className="button button-primary button-small" href={pageUrl(pageFiles.connection, "register")}>
-                  <ShinyText>Tester le parcours</ShinyText> <span aria-hidden="true">↗</span>
-                </a>
-              </Magnet>
+              <a className="button button-primary button-small" href={pageUrl(pageFiles.connection, "register")}>
+                Tester le parcours <span className="button-arrow" aria-hidden="true" />
+              </a>
             </div>
           </nav>
         </div>

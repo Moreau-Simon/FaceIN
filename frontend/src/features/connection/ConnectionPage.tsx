@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { pageFiles, pageUrl } from "../../app/navigation";
+import { pageFiles } from "../../app/navigation";
 import { RibbonArtwork } from "../../components/visuals/Artwork";
 import { FaceScanner, type MeshFrameRef, type ScannerState } from "../../components/auth/FaceScanner";
 import { closeCamera, describeCameraError, loadFaceModels, openCamera } from "../../lib/facein/camera";
@@ -349,7 +349,7 @@ export function ConnectionPage() {
                 {mode === "register" && (
                   <label className="checkbox">
                     <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-                    <span>J’accepte les <a href={pageUrl(pageFiles.home, "legal-notice")}>conditions générales</a> et la <a href={pageUrl(pageFiles.howItWorks, "privacy")}>politique de confidentialité</a>.</span>
+                    <span>J’accepte les <a href={pageFiles.terms}>conditions générales</a> et la <a href={pageFiles.privacy}>politique de confidentialité</a>.</span>
                   </label>
                 )}
                 {formError && <p className="form-error" role="alert">{formError}</p>}

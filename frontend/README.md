@@ -2,7 +2,7 @@
 
 Application multipage en React et TypeScript, construite avec Vite. Les entrées HTML conservent les URLs statiques; aucun routeur serveur n’est nécessaire.
 
-Le parcours biométrique et l’espace client cloud sont présents avec leurs composants, modèles et circuit, mais leurs modules d’exécution `src/lib/facein/` sont absents de cet espace de travail et ignorés par Git. Le build et les parcours ne sont donc pas validables tant que ces modules ne sont pas fournis.
+Le code du parcours biométrique et de l’espace client cloud est présent, mais leurs modules d’exécution `src/lib/facein/` sont absents de cet espace de travail et ignorés par Git. Les routes de connexion et d’espace affichent donc un état d’indisponibilité explicite au lieu de charger ces modules manquants. Le build Vite fonctionne, mais le contrôle TypeScript et les parcours réels ne sont pas validables tant que les modules ne sont pas fournis.
 
 ## Lancer l’application
 
@@ -26,13 +26,17 @@ Pour le backlog restant, les limites du prototype et les étapes détaillées de
 Pages servies :
 
 - `/` — accueil
-- `/connexion.html` — inscription et connexion par le visage
-- `/espace.html` — espace client (connexions en cours et historique), accessible une fois connecté
+- `/connexion.html` — état d’indisponibilité de l’inscription et de la connexion (modules manquants)
+- `/espace.html` — état d’indisponibilité de l’espace client (modules manquants)
 - `/comment-ca-marche.html` — explication du parcours prévu
 - `/integrer.html` — guide et exemples d’intégration
 - `/tarif.html` — offres provisoires
+- `/a-propos.html` — présentation du projet et de l’équipe
+- `/confidentialite.html` — état des informations de confidentialité du prototype
+- `/conditions-generales.html` — statut provisoire des offres et conditions
+- `/mentions-legales.html` — mentions à compléter avant publication
 
-La connexion reprend l’interface et le flux prévus par la branche `capture_camera_photo` : analyse du visage dans le navigateur, coffre local, preuve Groth16 et API Gateway. Ces étapes ne doivent pas être considérées comme opérationnelles tant que `src/lib/facein/` n’est pas disponible et que le build et les tests n’ont pas été relancés.
+Le code du parcours conservé dans `src/features/connection/ConnectionPage.tsx` reprend l’interface prévue par la branche `capture_camera_photo` : analyse du visage dans le navigateur, coffre local, preuve Groth16 et API Gateway. Il n’est pas branché à la route tant que `src/lib/facein/` est absent. Aucun compte, accès caméra ou jeton n’est créé sur les routes d’indisponibilité.
 
 Pour tester la connexion, démarrer l’API de la branche `capture_camera_photo` (port 8000). Une autre adresse peut être fournie au build :
 
@@ -52,18 +56,13 @@ src/
 │   ├── ui/               # composants réutilisables (BrandMark, Reveal, …)
 │   └── visuals/          # illustrations SVG et aperçu interactif
 ├── features/
-│   ├── home/             # page d’accueil et ses maquettes dédiées
-│   ├── connection/       # parcours d’inscription / connexion
-│   ├── how-it-works/     # explication du fonctionnement prévu
-│   ├── integration/      # guide d’intégration
-│   └── pricing/          # offres et comparatif
-├── pages/                # espace client
+│   └── connection/       # parcours d’inscription / connexion
+├── pages/                # accueil, fonctionnement, intégration, tarifs, espace client
 ├── lib/facein/           # dépendances d’exécution locales, ignorées par Git
-├── styles/site.css       # design system (tokens + @layer)
 └── main.tsx              # point d’entrée React
 ```
 
-Le modèle multipage est conservé : les six entrées HTML sont compilées dans `dist/`. Les URLs internes et les libellés de navigation sont centralisés dans `src/app/navigation.ts`; la table des pages (titre + composant) dans `src/app/routes.ts`. Le design system reste dans une seule feuille CSS organisée en couches (`reset`, `base`, `layout`, `components`, `pages`, `responsive`).
+Les pages publiques, les nouvelles pages du pied de page, l’en-tête et le pied de page reprennent le visuel cloud. Les textes conservent les informations locales utiles et signalent les fonctionnalités encore à valider. La feuille `styles/site.css` à la racine porte ce design system. Le modèle multipage est conservé : les dix entrées HTML sont compilées dans `dist/`. Les URLs internes et les libellés de navigation sont centralisés dans `src/app/navigation.ts`; la table des pages (titre + composant) dans `src/app/routes.ts`.
 
 ## Environnement OpenCode — Frontend Premium
 

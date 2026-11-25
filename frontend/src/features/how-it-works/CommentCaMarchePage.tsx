@@ -1,5 +1,5 @@
 import { prototypeStatus } from "../../app/content";
-import { pageFiles, pageUrl } from "../../app/navigation";
+import { pageFiles } from "../../app/navigation";
 import { Reveal } from "../../components/ui/Reveal";
 import { SectionHeading } from "../../components/ui/SectionHeading";
 
@@ -138,7 +138,7 @@ export function CommentCaMarchePage() {
             <ul><li>La preuve cryptographique</li><li>Le contexte de la demande et le nonce</li><li>Des métadonnées limitées, dont la collecte reste à documenter</li></ul>
           </article>
         </div>
-        <a className="text-link" href={pageUrl(pageFiles.home, "legal-notice")}>Lire la politique de confidentialité <span aria-hidden="true">↗</span></a>
+        <a className="text-link" href={pageFiles.privacy}>Lire la politique de confidentialité <span aria-hidden="true">↗</span></a>
       </section>
 
       <section className="renewal-section" id="revocation">

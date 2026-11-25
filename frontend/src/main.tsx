@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import "@fontsource-variable/inter";
-import "./styles/site.css";
+import "../styles/site.css";
 
 const mountNode = document.getElementById("root");
 

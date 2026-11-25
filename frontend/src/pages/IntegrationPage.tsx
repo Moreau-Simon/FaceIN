@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
-import { CodeBlock } from "../components/CodeBlock";
-import { Reveal } from "../components/Reveal";
+import { prototypeStatus } from "../app/content";
+import { pageFiles } from "../app/navigation";
+import { CodeBlock } from "../components/ui/CodeBlock";
+import { Reveal } from "../components/ui/Reveal";
+
+const docsSearchLabel = "Rechercher dans la doc";
 
 const integrationSteps = [
   {
@@ -9,8 +13,8 @@ const integrationSteps = [
     searchTerms: "identifiant clé serveur",
     content: (
       <>
-        <p>Depuis votre espace, ajoutez votre site. Vous obtenez un identifiant de service et une clé secrète.</p>
-        <p className="callout callout--warn"><strong>Gardez votre clé sur votre serveur.</strong> Ne l’ajoutez jamais au code de la page.</p>
+        <p>Dans l’espace prévu, chaque service aurait sa configuration propre : identité, droits demandés et règles d’accès. Le format des identifiants reste à définir.</p>
+        <p className="callout callout--warn"><strong>Une clé de service resterait côté serveur.</strong> Elle ne devrait jamais être ajoutée au code de la page.</p>
       </>
     ),
   },
@@ -20,7 +24,7 @@ const integrationSteps = [
     searchTerms: "HTML SDK balise",
     content: (
       <>
-        <p>Ajoutez le SDK avant la fermeture de la balise <code>body</code>.</p>
+        <p>L’intégration visée passerait par un script ajouté avant la fermeture de la balise <code>body</code>. Aucun SDK opérationnel n’est fourni dans ce dépôt.</p>
         <CodeBlock label="HTML" code={'<script src="facein-sdk.js"></script>'} />
       </>
     ),
@@ -31,7 +35,7 @@ const integrationSteps = [
     searchTerms: "HTML data-facein-login service ID",
     content: (
       <>
-        <p>Placez le bouton où vous le souhaitez. Voici le rendu :</p>
+        <p>Exemple de bouton envisagé :</p>
         <div className="integration-button-preview"><span className="facein-button">Se connecter avec FaceIN</span></div>
         <CodeBlock
           label="HTML"
@@ -42,32 +46,18 @@ const integrationSteps = [
   },
   {
     id: "verify-token",
-    title: "4. Vérifier le jeton",
-    searchTerms: "Python JWT token serveur",
+    title: "4. Vérifier le résultat",
+    searchTerms: "Python jeton résultat serveur",
     content: (
       <>
-        <p>FaceIN vous transmet un jeton JWT signé, valable une heure. Vérifiez-le sur votre serveur avant d’ouvrir la session.</p>
+        <p>La vérification côté serveur reste à définir. Si un jeton est retenu, sa durée de vie, son destinataire et sa révocation devront être précisés.</p>
         <CodeBlock
-          label="Python"
+          label="Python · exemple de la maquette"
           code={'from facein_verify import verify_token\n\nuser = verify_token(token, service_id="VOTRE_ID")\nif user.valid:\n    open_session(user.id)'}
         />
       </>
     ),
   },
-];
-
-const documentationIndex = [
-  "Rechercher dans la doc",
-  "Démarrer",
-  "Vue d’ensemble",
-  "Avant de commencer",
-  "Intégration",
-  "Déclarer votre service",
-  "Ajouter le script",
-  "Ajouter le bouton",
-  "Vérifier le jeton",
-  "Ressources",
-  "Tester le parcours",
 ];
 
 export function IntegrationPage() {
@@ -86,13 +76,14 @@ export function IntegrationPage() {
         <div className="container page-hero__inner">
           <div>
           <p className="lead-label">Guide d’intégration</p>
-          <h1>Intégrez FaceIN à votre site. <span>Vous ne recevez jamais de donnée biométrique, seulement un jeton.</span></h1>
+          <h1>Intégrer FaceIN : <span>le parcours visé</span></h1>
+          <p className="note">Objectif : le service reçoit un résultat d’authentification, pas une donnée biométrique brute. Le format du jeton reste à définir.</p>
           <div className="requirements" id="requirements">
             <span><i>✓</i> Un compte FaceIN</span>
             <span><i>✓</i> Un site en HTTPS (la caméra ne s’active pas en HTTP)</span>
-            <span><i>✓</i> Un serveur qui peut vérifier un jeton JWT</span>
+            <span><i>✓</i> Un serveur prêt à vérifier un résultat d’authentification</span>
           </div>
-          <p className="note">Le SDK n’est pas encore publié : les extraits ci-dessous présentent l’intégration prévue.</p>
+          <p className="note">{prototypeStatus} Les exemples ci-dessous ne sont reliés ni à un SDK ni à un endpoint opérationnel.</p>
           </div>
         </div>
       </section>
@@ -100,20 +91,20 @@ export function IntegrationPage() {
       <section className="container section-padding">
         <div className="docs-layout">
           <aside className="docs-sidebar">
-            <label htmlFor="docs-search">{documentationIndex[0]}</label>
+            <label htmlFor="docs-search">{docsSearchLabel}</label>
             <input id="docs-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
             <nav aria-label="Sommaire de l’intégration">
               <h2>Démarrer</h2><a href="#overview">Vue d’ensemble</a><a href="#requirements">Avant de commencer</a>
               <h2>Intégration</h2>
               {integrationSteps.map((step) => <a key={step.id} href={`#${step.id}`}>{step.title.replace(/^\d+\.\s/, "")}</a>)}
-              <h2>Ressources</h2><a href="#resources">Tester le parcours</a>
+              <h2>Ressources</h2><a href="#resources">Site de démonstration</a><a href="#resources">SDK (à venir)</a><a href="#resources">Questions fréquentes</a>
             </nav>
           </aside>
           <div className="docs-content">
             <div id="overview" className="docs-intro">
               <p className="lead-label">Vue d’ensemble</p>
               <h2>Avant de commencer</h2>
-              <p>Il vous faut un compte FaceIN, un site en HTTPS (la caméra ne s’active pas en HTTP) et un serveur capable de vérifier un jeton JWT.</p>
+              <p>Un compte FaceIN, un site en HTTPS et un serveur prêt à vérifier un résultat d’authentification dont le format reste à définir.</p>
             </div>
             {filteredSteps.length === 0 ? (
               <p className="empty-state" role="status">Aucune étape ne correspond à « {query} ».</p>
@@ -125,13 +116,14 @@ export function IntegrationPage() {
             ))}
             <Reveal className="docs-next-step" id="resources">
               <span className="lead-label">Étape suivante</span>
-              <h2>Testez le parcours vous-même</h2>
-              <p>Créez une identité et connectez-vous pour voir exactement ce que vivront vos utilisateurs.</p>
-              <a className="button button-primary" href="connexion.html#register">Essayer le parcours <span className="button-arrow" aria-hidden="true" /></a>
+              <h2>Suivre le parcours de démonstration</h2>
+              <p>Consultez les écrans prévus ; aucune vérification réelle n’est effectuée ici.</p>
+              <a className="button button-primary" href={pageFiles.connection}>Ouvrir la démo <span className="button-arrow" aria-hidden="true" /></a>
+              <p className="note">Aucun SDK téléchargeable n’est fourni dans ce dépôt.</p>
               <div className="resource-grid">
                 <a href="#script"><b>HTML</b><span>Ajouter le script</span></a>
                 <a href="#button"><b>HTML</b><span>Ajouter le bouton</span></a>
-                <a href="#verify-token"><b>Python</b><span>Vérifier le jeton</span></a>
+                <a href="#verify-token"><b>Python</b><span>Vérifier le résultat</span></a>
               </div>
             </Reveal>
           </div>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { pageFiles, pageUrl } from "../../app/navigation";
 import { SiteFooter } from "./SiteFooter";
 import { SiteHeader } from "./SiteHeader";
 
@@ -15,9 +16,9 @@ export function SiteShell({ children, variant = "default" }: SiteShellProps) {
       {variant === "default" ? <SiteFooter /> : (
         <footer className="auth-footer container">
           <small>© 2026 FaceIN</small>
-          <a href="index.html#contact">Contact</a>
-          <a href="comment-ca-marche.html#privacy">Confidentialité</a>
-          <a href="index.html#legal-notice">Mentions légales</a>
+          <a href={pageUrl(pageFiles.home, "contact")}>Contact</a>
+          <a href={pageFiles.privacy}>Confidentialité</a>
+          <a href={pageFiles.legalNotice}>Mentions légales</a>
         </footer>
       )}
     </>

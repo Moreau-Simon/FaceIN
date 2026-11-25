@@ -6,6 +6,10 @@ export const pageFiles = {
   howItWorks: "comment-ca-marche.html",
   integration: "integrer.html",
   pricing: "tarif.html",
+  about: "a-propos.html",
+  privacy: "confidentialite.html",
+  terms: "conditions-generales.html",
+  legalNotice: "mentions-legales.html",
 } as const;
 
 export type PageFile = (typeof pageFiles)[keyof typeof pageFiles];
@@ -44,17 +48,17 @@ export const footerGroups = [
   {
     title: "Projet",
     links: [
-      ["À propos", pageUrl(pageFiles.home, "team")],
-      ["L’équipe", pageUrl(pageFiles.home, "team")],
+      ["À propos", pageUrl(pageFiles.about, "projet")],
+      ["L’équipe", pageUrl(pageFiles.about, "equipe")],
       ["Contact", pageUrl(pageFiles.home, "contact")],
     ],
   },
   {
     title: "Légal",
     links: [
-      ["Confidentialité", pageUrl(pageFiles.howItWorks, "privacy")],
-      ["CGV", pageUrl(pageFiles.home, "legal-notice")],
-      ["Mentions légales", pageUrl(pageFiles.home, "legal-notice")],
+      ["Confidentialité", pageUrl(pageFiles.privacy)],
+      ["CGV", pageUrl(pageFiles.terms)],
+      ["Mentions légales", pageUrl(pageFiles.legalNotice)],
     ],
   },
 ];

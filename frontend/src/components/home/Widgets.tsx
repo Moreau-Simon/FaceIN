@@ -13,9 +13,9 @@ const Check = () => (
 /* ------------------------------------------------------------------ */
 
 const verificationRows = [
-  { label: "Vecteur calculé sur l’appareil", value: "128 valeurs", mono: true },
-  { label: "Image effacée", value: "check" },
-  { label: "Preuve générée", value: "zk-SNARK", mono: true },
+  { label: "Traitement local", value: "cible" },
+  { label: "Image non transmise", value: "check" },
+  { label: "Preuve à générer", value: "à définir" },
 ];
 const nodes = [
   { label: "Nœud A", ok: true },
@@ -43,7 +43,7 @@ export function PartnerLoginVisual() {
               </svg>
               {scanning && <span className="scan-hex__beam" aria-hidden="true" />}
             </div>
-            <small>L’image reste sur cet appareil</small>
+            <small>Traitement local visé</small>
             <span className={`fake-button${done ? " is-done" : ""}`}><BrandMark inverted /> {done ? "Connecté avec FaceIN" : "Se connecter avec FaceIN"}</span>
           </div>
         </div>
@@ -52,7 +52,7 @@ export function PartnerLoginVisual() {
 
       <div className="verify-popover">
         <div className="verify-popover__bar"><i /><i /><i /><span>verify.facein.fr</span></div>
-        <strong>Récapitulatif de la vérification</strong>
+        <strong>Récapitulatif illustratif</strong>
         <ul>
           {verificationRows.map((row, index) => (
             <li key={row.label} className={step > index ? "is-on" : ""}>
@@ -69,8 +69,8 @@ export function PartnerLoginVisual() {
             </li>
           ))}
         </ul>
-        <div className={`verify-popover__total${step > 6 ? " is-on" : ""}`}><span>Consensus</span><b>2 sur 3</b></div>
-        <div className={`verify-popover__result${step > 7 ? " is-on" : ""}`}>Connexion autorisée</div>
+        <div className={`verify-popover__total${step > 6 ? " is-on" : ""}`}><span>Seuil</span><b>à définir</b></div>
+        <div className={`verify-popover__result${step > 7 ? " is-on" : ""}`}>Décision simulée</div>
       </div>
     </div>
   );
@@ -81,8 +81,8 @@ export function PartnerLoginVisual() {
 /* ------------------------------------------------------------------ */
 
 const plans = {
-  standard: { name: "Offre Standard", vector: "Vecteur de 128 valeurs", level: 0.56, speed: "plus rapide", price: "Gratuit" },
-  reinforced: { name: "Offre Renforcée", vector: "Vecteur de 256 valeurs", level: 0.86, speed: "un peu plus long", price: "2,99 € / mois" },
+  standard: { name: "Offre Standard", vector: "Niveau standard (cible)", level: 0.56, availability: "à venir" },
+  reinforced: { name: "Offre Renforcée", vector: "Niveau renforcé (cible)", level: 0.86, availability: "à venir" },
 };
 const bars = [38, 52, 44, 61, 57, 74, 66, 83, 78, 92, 88, 104, 97, 112];
 
@@ -95,7 +95,6 @@ export function SecurityVisual() {
   const reduce = useReducedMotion();
   const current = plans[plan];
   const max = Math.max(...bars);
-  const total = bars.reduce((sum, value) => sum + value, 0);
 
   return (
     <div className="security-visual">
@@ -123,16 +122,16 @@ export function SecurityVisual() {
           <div className="meter__track"><motion.i animate={{ scaleX: current.level }} initial={false} transition={{ type: "spring", stiffness: 140, damping: 20 }} /></div>
         </div>
         <dl className="plan-card__facts">
-          <div><dt>Temps de connexion</dt><dd>{current.speed}</dd></div>
-          <div><dt>Tarif</dt><dd>{current.price}</dd></div>
+          <div><dt>Niveau</dt><dd>{current.vector}</dd></div>
+          <div><dt>Disponibilité</dt><dd>{current.availability}</dd></div>
         </dl>
       </div>
 
       <div className="chart-card" ref={chartRef}>
-        <small>Connexions des 14 derniers jours</small>
-        <strong>{hovered === null ? total.toLocaleString("fr-FR") : bars[hovered]}</strong>
-        <span className="chart-card__hint">{hovered === null ? "au total" : `jour ${hovered + 1}`}</span>
-        <div className="bars" role="img" aria-label="Exemple de graphique : connexions quotidiennes en hausse">
+        <small>Connexions illustratives</small>
+        <strong>{hovered === null ? "1 248" : `Jour ${hovered + 1}`}</strong>
+        <span className="chart-card__hint">{hovered === null ? "exemple" : "donnée illustrative"}</span>
+        <div className="bars" role="img" aria-label="Graphique illustratif des connexions">
           {bars.map((value, index) => (
             <motion.i
               key={index}
@@ -175,13 +174,13 @@ export function ProofVisual() {
 
   return (
     <div className="proof-visual">
-      <span className="chip chip--mono">vecteur <b>••••••••</b></span>
+      <span className="chip chip--mono">preuve · <b>••••••••</b></span>
       <svg viewBox="0 0 200 200" className="proof-visual__ring" aria-hidden="true">
         {dots.map((dot, index) => (
           <circle key={index} cx={dot.x} cy={dot.y} r="2.3" fill={dot.color} style={{ animationDelay: `${dot.delay}s` }} />
         ))}
       </svg>
-      <span className="chip chip--ok"><Check /> Preuve valide</span>
+      <span className="chip chip--ok"><Check /> Preuve simulée</span>
     </div>
   );
 }
@@ -215,7 +214,7 @@ export function IdentityVisual() {
           <motion.span className="id-card__glare" style={{ "--gx": glareX, "--gy": glareY } as never} />
         </div>
         <div className="id-card__meta">
-          <div><strong>manon_m</strong><span>Engagement actif</span></div>
+          <div><strong>manon_m</strong><span>Engagement à définir</span></div>
           <em>FaceIN</em>
         </div>
       </motion.div>
@@ -360,7 +359,7 @@ export function NetworkVisual() {
           {label.id}
         </span>
       ))}
-      <span className="sr-only">Trois nœuds A, B et C vérifient la preuve ; deux validations suffisent.</span>
+      <span className="sr-only">Illustration d’un réseau de nœuds à construire ; la règle de décision reste à définir.</span>
     </div>
   );
 }

@@ -11,27 +11,32 @@ La structure principale est organisée ainsi :
 ```text
 frontend/
 ├── index.html, connexion.html, espace.html, comment-ca-marche.html, integrer.html, tarif.html
+├── a-propos.html, confidentialite.html, conditions-generales.html, mentions-legales.html
 ├── src/
 │   ├── app/                 # composition, navigation et table des pages
 │   ├── components/          # composants partagés (layout, UI, visuels)
-│   ├── features/            # accueil, connexion, fonctionnement, intégration, tarifs
-│   ├── pages/               # espace client
-│   └── styles/site.css      # styles et design system
+│   ├── features/            # connexion
+│   └── pages/               # pages publiques, pages d’information et espace client
+├── styles/site.css          # styles et design system cloud
 ├── docs/                    # décisions, plan, qualité et guides
 ├── package.json
 └── package-lock.json
 ```
 
-Les six entrées HTML conservent leurs URL :
+Les dix entrées HTML conservent leurs URL :
 
 | Page | URL locale | État |
 |---|---|---|
 | Accueil | `/` | Présentation du projet et démonstrations visuelles |
-| Connexion | `/connexion.html` | Interface cloud portée ; modules d’exécution manquants |
-| Espace client | `/espace.html` | Historique local prévu ; modules d’exécution manquants |
+| Connexion | `/connexion.html` | État d’indisponibilité explicite ; modules d’exécution manquants |
+| Espace client | `/espace.html` | État d’indisponibilité explicite ; modules d’exécution manquants |
 | Fonctionnement | `/comment-ca-marche.html` | Description du fonctionnement envisagé |
 | Intégration | `/integrer.html` | Guide et exemples illustratifs, sans SDK ou endpoint disponible |
 | Offres | `/tarif.html` | Tarifs et offres indicatifs, sans facturation connectée |
+| À propos / équipe | `/a-propos.html` | Présentation du projet ; informations nominatives à confirmer |
+| Confidentialité | `/confidentialite.html` | État du prototype et traitements envisagés, non politique définitive |
+| CGV | `/conditions-generales.html` | Offres non contractuelles ; conditions à établir |
+| Mentions légales | `/mentions-legales.html` | Brouillon signalant les informations éditeur/hébergeur manquantes |
 
 La scène du hero est une illustration 3D procédurale : un bouclier, des orbites et des nœuds lumineux. Elle ne contient pas de visage ni de SVG de remplacement. Son chargement est différé et elle respecte le réglage de mouvement réduit.
 
@@ -58,7 +63,7 @@ Les éléments ci-dessous sont un backlog proposé, pas des fonctionnalités dé
 
 ### Priorité 2 — préparer la livraison
 
-- Choisir l’hébergement statique et vérifier qu’il sert correctement les cinq fichiers HTML.
+- Choisir l’hébergement statique et vérifier qu’il sert correctement les dix fichiers HTML.
 - Ajouter une intégration continue qui exécute le contrôle TypeScript et le build sur chaque changement.
 - Préparer les variables d’environnement et les secrets côté serveur ; ne jamais placer de secret dans le bundle frontend.
 - Documenter les procédures de mise en production, de retour arrière et de signalement d’incidents.

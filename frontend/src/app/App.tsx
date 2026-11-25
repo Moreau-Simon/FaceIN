@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { SiteShell } from "../components/layout/SiteShell";
 import { getCurrentRoute } from "./routes";
 
@@ -20,7 +20,9 @@ export function App() {
 
   return (
     <SiteShell variant={route.variant}>
-      <PageComponent />
+      <Suspense fallback={<p className="container section-padding" role="status">Chargement de la page…</p>}>
+        <PageComponent />
+      </Suspense>
     </SiteShell>
   );
 }
