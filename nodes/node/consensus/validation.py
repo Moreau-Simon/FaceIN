@@ -35,6 +35,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Constantes BN254 et paramètres du circuit ZKP
+BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+EXPECTED_PUBLIC_SIGNALS_COUNT = 4
+DEFAULT_SEUIL_MAX = int(os.getenv("DISTANCE_THRESHOLD", "16000000"))
+
 
 @dataclass
 class DetailVote:
@@ -245,6 +250,10 @@ def verifier_preuve(
         )
         return False
 
+    if os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in ("true", "1", "yes"):
+        logger.warning("Vérification ZKP en mode simulation (MOCK_ZKP_VERIFICATION=true).")
+        return True
+
     # Normalisation de la preuve en chaîne JSON
     if isinstance(preuve_zkp_json, (dict, list)):
         preuve_str = json.dumps(preuve_zkp_json)
@@ -387,7 +396,7 @@ class VerificateurZKP:
         nonce: str,
         service_cible: str,
     ) -> bool:
-        # 1. Décodage : enveloppe {"proof", "publicSignals"} ou preuve seule
+        # 1. Décodage : enveloppe {"proof", "publicSignals"}
         try:
             if isinstance(preuve_recue, (bytes, bytearray)):
                 preuve_recue = bytes(preuve_recue).decode("utf-8")
@@ -404,10 +413,34 @@ class VerificateurZKP:
                 return False
             public_signals = [str(signal) for signal in signaux_bruts]
         else:
-            preuve = contenu
-            public_signals = []
+            logger.warning("Structure d'enveloppe preuve/signaux invalide pour %s.", utilisateur_id)
+            return False
 
-        # 2. Engagement de référence de l'utilisateur
+        # 2. Vérification stricte de la cardinalité des signaux publics (4 attendus)
+        if len(public_signals) != EXPECTED_PUBLIC_SIGNALS_COUNT:
+            logger.warning(
+                "Nombre de signaux publics invalide pour %s : %d (attendu : %d).",
+                utilisateur_id,
+                len(public_signals),
+                EXPECTED_PUBLIC_SIGNALS_COUNT,
+            )
+            return False
+
+        # 3. Vérification canonique BN254 de chaque signal public
+        for i, sig in enumerate(public_signals):
+            s = str(sig).strip()
+            if not s or not s.isdigit():
+                logger.warning("Signal public [%d] non numérique pour %s : %s", i, utilisateur_id, s)
+                return False
+            if len(s) > 1 and s.startswith("0"):
+                logger.warning("Signal public [%d] non canonique (zéros superflus) pour %s : %s", i, utilisateur_id, s)
+                return False
+            val = int(s)
+            if val >= BN254_PRIME:
+                logger.warning("Signal public [%d] hors corps BN254 pour %s : %d", i, utilisateur_id, val)
+                return False
+
+        # 4. Engagement de référence de l'utilisateur
         engagement = self.store.get(utilisateur_id)
         if engagement is None:
             # L'engagement doit être enregistré lors du processus d'inscription
@@ -421,9 +454,7 @@ class VerificateurZKP:
             )
             return False
 
-        if not public_signals:
-            public_signals = [engagement]
-        elif public_signals[0] != engagement:
+        if public_signals[0] != str(engagement).strip():
             logger.warning(
                 "Incohérence d'engagement pour %s : stocké '%s' vs public '%s'.",
                 utilisateur_id,
@@ -432,13 +463,42 @@ class VerificateurZKP:
             )
             return False
 
-        # 3. Vérification cryptographique (snarkjs)
-        # Les 4 signaux publics attendus (ordre strict) :
+        # 5. Vérification du seuil maximal imposé par le serveur
+        if int(public_signals[1]) != DEFAULT_SEUIL_MAX:
+            logger.warning(
+                "Tentative d'altération du seuil ZKP pour %s : reçu=%s vs attendu=%s",
+                utilisateur_id,
+                public_signals[1],
+                DEFAULT_SEUIL_MAX,
+            )
+            return False
+
+        # 6. Vérification de la liaison cryptographique au nonce de session
+        try:
+            nonce_clean = str(nonce).strip().lower()
+            nonce_val = int(nonce_clean, 16)
+            hi_attendu = str(nonce_val >> 128)
+            lo_attendu = str(nonce_val & ((1 << 128) - 1))
+            if public_signals[2] != hi_attendu or public_signals[3] != lo_attendu:
+                logger.warning(
+                    "Liaison nonce ZKP invalide pour %s : (%s, %s) vs attendu (%s, %s)",
+                    utilisateur_id,
+                    public_signals[2],
+                    public_signals[3],
+                    hi_attendu,
+                    lo_attendu,
+                )
+                return False
+        except Exception as exc:
+            logger.warning("Erreur lors de la validation du nonce ZKP pour %s : %s", utilisateur_id, exc)
+            return False
+
+        # 7. Vérification cryptographique (snarkjs)
+        # Les 4 signaux publics vérifiés :
         #   [0] engagementAttendu   — Poseidon hash du vecteur de référence
         #   [1] seuilMax            — Distance maximale tolérée
         #   [2] nonceHi             — 128 bits de poids fort du nonce (nonce >> 128)
         #   [3] nonceLo             — 128 bits de poids faible du nonce (nonce & mask)
-        # nonceHi et nonceLo lient cryptographiquement la preuve à ce challenge.
         if not verifier_preuve(preuve, public_signals, self._verification_key_path):
             return False
 

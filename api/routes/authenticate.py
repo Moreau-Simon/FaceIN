@@ -22,13 +22,23 @@ try:
     from services.grpc_bridge import verify_on_nodes
     from services.jwt_manager import generate_token
     from services.rate_limiter import enforce_rate_limit
-    from services.zkp_verifier import verify_proof
+    from services.store import get_commitment
+    from services.zkp_verifier import (
+        DEFAULT_SEUIL_MAX,
+        validate_public_signals_integrity,
+        verify_proof,
+    )
 except ImportError:
     from api.models import AuthenticateRequest, AuthenticateResponse
     from api.services.grpc_bridge import verify_on_nodes
     from api.services.jwt_manager import generate_token
     from api.services.rate_limiter import enforce_rate_limit
-    from api.services.zkp_verifier import verify_proof
+    from api.services.store import get_commitment
+    from api.services.zkp_verifier import (
+        DEFAULT_SEUIL_MAX,
+        validate_public_signals_integrity,
+        verify_proof,
+    )
 
 logger = logging.getLogger("facein.routes.authenticate")
 
@@ -81,8 +91,35 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
             message="Échec de l'authentification : le défi cryptographique est malformé.",
         )
 
-    # Étape 2 : Vérification locale de la preuve ZKP (pré-filtre rapide)
-    # Les signaux publics doivent contenir 4 valeurs : [engagementAttendu, seuilMax, nonceHi, nonceLo]
+    # Étape 2 : Vérification de l'utilisateur et validation stricte des signaux publics
+    expected_commitment = get_commitment(user_id)
+    if not expected_commitment:
+        logger.warning("[%s] Échec auth : utilisateur non inscrit ou engagement introuvable.", user_id)
+        return AuthenticateResponse(
+            success=False,
+            authenticated=False,
+            reason="Utilisateur non enregistré ou engagement introuvable",
+            raison_refus="Engagement introuvable",
+            message="Échec de l'authentification : utilisateur non enregistré.",
+        )
+
+    ok_signals, err_signals = validate_public_signals_integrity(
+        public_signals=payload.public_signals,
+        expected_commitment=expected_commitment,
+        nonce_hex=nonce,
+        max_threshold=DEFAULT_SEUIL_MAX,
+    )
+    if not ok_signals:
+        logger.warning("[%s] Échec auth - Signaux publics ZKP non conformes : %s", user_id, err_signals)
+        return AuthenticateResponse(
+            success=False,
+            authenticated=False,
+            reason=err_signals,
+            raison_refus=err_signals,
+            message="Échec de l'authentification : signaux publics ZKP non conformes.",
+        )
+
+    # Étape 3 : Vérification locale de la preuve ZKP (pré-filtre rapide)
     try:
         is_zkp_valid = verify_proof(
             proof=payload.proof,
@@ -93,7 +130,7 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
         is_zkp_valid = False
 
     if not is_zkp_valid:
-        logger.warning("[%s] Échec auth - Étape 2 : Preuve ZKP invalide.", user_id)
+        logger.warning("[%s] Échec auth - Étape 3 : Preuve ZKP invalide.", user_id)
         return AuthenticateResponse(
             success=False,
             authenticated=False,
@@ -102,7 +139,7 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
             message="Échec de l'authentification : preuve mathématique ZKP invalide.",
         )
 
-    # Étape 3 : Consensus distribué gRPC (2/3 des nœuds requis).
+    # Étape 4 : Consensus distribué gRPC (2/3 des nœuds requis).
     # C'est ici que le nœud :
     #   - consomme le nonce de façon atomique (check propriétaire + service + expiry AVANT pop)
     #   - vérifie l'engagement enregistré vs public_signals[0]
@@ -122,7 +159,7 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
 
     if not consensus_result.get("consensus", False):
         logger.warning(
-            "[%s] Échec auth - Étape 3 : Consensus non atteint (%s).",
+            "[%s] Échec auth - Étape 4 : Consensus non atteint (%s).",
             user_id,
             consensus_result.get("majority"),
         )
@@ -134,7 +171,7 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
             message="Échec de l'authentification : le quorum de vérification n'a pas été atteint.",
         )
 
-    # Étape 4 : Génération et émission du jeton d'accès JWT
+    # Étape 5 : Génération et émission du jeton d'accès JWT
     try:
         token = generate_token(user_id=user_id)
     except Exception as exc:

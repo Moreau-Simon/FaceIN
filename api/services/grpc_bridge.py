@@ -23,8 +23,12 @@ from typing import Any, Optional
 # ==============================================================================
 try:
     import grpc
+    _RpcError = grpc.RpcError
 except ImportError:
     grpc = None  # type: ignore
+
+    class _RpcError(Exception):
+        pass
 
 try:
     import verification_pb2  # type: ignore
@@ -149,14 +153,15 @@ def _verifier_noeud_unitaire(
                 "token": "token-simule",
                 "raison_refus": "",
                 "coordinateur_id": node_id,
-                "votes": {node_id: True},
+                "votes": {n["id"]: True for n in DEFAULT_NODES},
                 "votes_recus": [
-                    {"noeud_id": node_id, "vote_pour": True, "raison": ""}
+                    {"noeud_id": n["id"], "vote_pour": True, "raison": ""}
+                    for n in DEFAULT_NODES
                 ],
-                "nb_votes_pour": 1,
+                "nb_votes_pour": len(DEFAULT_NODES),
                 "nb_votes_contre": 0,
                 "noeuds_indisponibles": [],
-                "seuil_requis": 1,
+                "seuil_requis": (len(DEFAULT_NODES) // 2) + 1,
             }
         logger.error("[%s] Protobuf/gRPC non compilé ou indisponible.", node_id)
         return None
@@ -233,7 +238,7 @@ def _verifier_noeud_unitaire(
             "seuil_requis": seuil,
         }
 
-    except grpc.RpcError as rpc_error:
+    except _RpcError as rpc_error:
         logger.warning(
             "[%s] Erreur de communication gRPC vers %s (%s).",
             node_id,
@@ -420,7 +425,7 @@ def request_nonce_from_node(
                 )
                 return str(reponse.nonce), exp_seconds
 
-        except grpc.RpcError as rpc_err:
+        except _RpcError as rpc_err:
             logger.warning(
                 "[%s] Erreur RPC lors de la demande de nonce sur %s : %s",
                 node_id,

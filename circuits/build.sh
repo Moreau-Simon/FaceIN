@@ -65,6 +65,23 @@ circom distance.circom --r1cs --wasm --sym -o "$BUILD_DIR" -l node_modules
 echo -e "${GREEN}✓ Circuit compilé avec succès dans ${BUILD_DIR}/${NC}"
 
 # ------------------------------------------------------------------------------
+# Fonction pour générer une entropie cryptographique forte (évite toute graine codée en dur)
+generate_secure_entropy() {
+    if [ -n "${CONTRIBUTOR_ENTROPY:-}" ]; then
+        echo -n "$CONTRIBUTOR_ENTROPY"
+    elif command -v openssl &> /dev/null; then
+        openssl rand -hex 64
+    elif [ -r /dev/urandom ]; then
+        head -c 64 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    elif command -v node &> /dev/null; then
+        node -e 'process.stdout.write(require("crypto").randomBytes(64).toString("hex"))'
+    elif command -v python3 &> /dev/null; then
+        python3 -c 'import secrets; print(secrets.token_hex(64), end="")'
+    else
+        echo -n "$(date +%s%N)-$$-${RANDOM}"
+    fi
+}
+
 PTAU_FILE="pot15_final.ptau"
 
 echo -e "${YELLOW}[3/6] Préparation du fichier Powers of Tau (${PTAU_FILE})...${NC}"
@@ -72,7 +89,8 @@ if [ ! -f "$PTAU_FILE" ]; then
     echo -e "Génération locale d'un fichier Powers of Tau 15 (2^15 = 32768 contraintes max)..."
     rm -f pot15_*.ptau
     npx snarkjs powersoftau new bn128 15 pot15_0000.ptau -v
-    npx snarkjs powersoftau contribute pot15_0000.ptau pot15_0001.ptau --name="FaceIn-Dev" -v -e="FaceInEntropySeed123"
+    ENTROPY_PTAU=$(generate_secure_entropy)
+    npx snarkjs powersoftau contribute pot15_0000.ptau pot15_0001.ptau --name="FaceIn-Dev" -v -e="$ENTROPY_PTAU"
     npx snarkjs powersoftau prepare phase2 pot15_0001.ptau "$PTAU_FILE" -v
     rm -f pot15_0000.ptau pot15_0001.ptau
     echo -e "${GREEN}✓ ${PTAU_FILE} généré avec succès en local.${NC}"
@@ -93,7 +111,8 @@ echo -e "${GREEN}✓ Setup initial terminé.${NC}"
 # ------------------------------------------------------------------------------
 ZKEY_FINAL="${BUILD_DIR}/distance.zkey"
 echo -e "${YELLOW}[5/6] Contribution d'entropie pour la cérémonie (${ZKEY_FINAL})...${NC}"
-snarkjs zkey contribute "$ZKEY_INIT" "$ZKEY_FINAL" --name="FaceIn" -v -e="FaceIn-Biometric-Auth-Entropy-Phase1"
+ENTROPY_ZKEY=$(generate_secure_entropy)
+    snarkjs zkey contribute "$ZKEY_INIT" "$ZKEY_FINAL" --name="FaceIn" -v -e="$ENTROPY_ZKEY"
 echo -e "${GREEN}✓ Clé de prouveur finale générée avec succès.${NC}"
 
 # ------------------------------------------------------------------------------
@@ -102,6 +121,7 @@ echo -e "${GREEN}✓ Clé de prouveur finale générée avec succès.${NC}"
 VK_FILE="${BUILD_DIR}/verification_key.json"
 echo -e "${YELLOW}[6/6] Exportation de la clé de vérification (${VK_FILE})...${NC}"
 snarkjs zkey export verificationkey "$ZKEY_FINAL" "$VK_FILE"
+cp -f "$VK_FILE" "../nodes/shared/verification_key.json" 2>/dev/null || true
 echo -e "${GREEN}✓ Clé de vérification exportée.${NC}"
 
 # ------------------------------------------------------------------------------

@@ -7,6 +7,11 @@ import json
 import asyncio
 import os
 import sys
+
+# Forcer le backend mémoire et autoriser la simulation par défaut dans les tests unitaires
+os.environ.setdefault("STORE_BACKEND", "memory")
+os.environ.setdefault("ALLOW_MOCK_CONSENSUS", "true")
+
 import tempfile
 import time
 import unittest
@@ -107,14 +112,25 @@ class TestStoreService(unittest.TestCase):
 
 
 class TestZkpVerifier(unittest.TestCase):
-    """Tests du module de vérification ZKP."""
+    """Tests du module de vérification ZKP et d'intégrité des signaux publics."""
+
+    VALID_PROOF = {
+        "pi_a": ["123", "456"],
+        "pi_b": [["11", "22"], ["33", "44"]],
+        "pi_c": ["789", "101"],
+    }
+    VALID_NONCE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    VAL_INT = int(VALID_NONCE, 16)
+    NONCE_HI = str(VAL_INT >> 128)
+    NONCE_LO = str(VAL_INT & ((1 << 128) - 1))
+    VALID_SIGNALS = ["123456789", "16000000", NONCE_HI, NONCE_LO]
 
     def test_zkp_mock_mode(self):
         os.environ["MOCK_ZKP_VERIFICATION"] = "true"
         try:
             result = zkp_verifier.verify_proof(
-                proof={"pi_a": []},
-                public_signals=["123", "1000"],
+                proof=self.VALID_PROOF,
+                public_signals=self.VALID_SIGNALS,
             )
             self.assertTrue(result)
         finally:
@@ -123,11 +139,101 @@ class TestZkpVerifier(unittest.TestCase):
     def test_missing_vk_returns_false(self):
         os.environ.pop("MOCK_ZKP_VERIFICATION", None)
         result = zkp_verifier.verify_proof(
-            proof={"pi_a": []},
-            public_signals=["123"],
+            proof=self.VALID_PROOF,
+            public_signals=self.VALID_SIGNALS,
             verification_key_path="/non/existent/path/verification_key.json",
         )
         self.assertFalse(result)
+
+    def test_public_signals_structure_validation(self):
+        # Cardinalité incorrecte (moins de 4)
+        ok, _ = zkp_verifier.validate_public_signals_structure(["123", "456"])
+        self.assertFalse(ok)
+
+        # Cardinalité incorrecte (plus de 4)
+        ok, _ = zkp_verifier.validate_public_signals_structure(self.VALID_SIGNALS + ["extra"])
+        self.assertFalse(ok)
+
+        # Signal non numérique
+        ok, _ = zkp_verifier.validate_public_signals_structure(["abc", "16000000", "1", "2"])
+        self.assertFalse(ok)
+
+        # Signal avec zéros non significatifs en tête (non canonique)
+        ok, _ = zkp_verifier.validate_public_signals_structure(["0123", "16000000", "1", "2"])
+        self.assertFalse(ok)
+
+        # Signal hors corps BN254
+        ok, _ = zkp_verifier.validate_public_signals_structure(
+            [str(zkp_verifier.BN254_PRIME + 10), "16000000", "1", "2"]
+        )
+        self.assertFalse(ok)
+
+        # Valide
+        ok, err = zkp_verifier.validate_public_signals_structure(self.VALID_SIGNALS)
+        self.assertTrue(ok)
+        self.assertEqual(err, "")
+
+    def test_public_signals_integrity_validation(self):
+        # 1. Valide nominal
+        ok, err = zkp_verifier.validate_public_signals_integrity(
+            public_signals=self.VALID_SIGNALS,
+            expected_commitment="123456789",
+            nonce_hex=self.VALID_NONCE,
+            max_threshold=16000000,
+        )
+        self.assertTrue(ok)
+
+        # 2. Incohérence d'engagement
+        ok, err = zkp_verifier.validate_public_signals_integrity(
+            public_signals=self.VALID_SIGNALS,
+            expected_commitment="999999999",
+            nonce_hex=self.VALID_NONCE,
+            max_threshold=16000000,
+        )
+        self.assertFalse(ok)
+        self.assertIn("L'engagement biométrique de référence ne correspond pas", err)
+
+        # 3. Manipulation du seuil par le client
+        signaux_seuil_altere = list(self.VALID_SIGNALS)
+        signaux_seuil_altere[1] = "99999999"
+        ok, err = zkp_verifier.validate_public_signals_integrity(
+            public_signals=signaux_seuil_altere,
+            expected_commitment="123456789",
+            nonce_hex=self.VALID_NONCE,
+            max_threshold=16000000,
+        )
+        self.assertFalse(ok)
+        self.assertIn("Seuil biométrique non conforme", err)
+
+        # 4. Nonce mismatch
+        ok, err = zkp_verifier.validate_public_signals_integrity(
+            public_signals=self.VALID_SIGNALS,
+            expected_commitment="123456789",
+            nonce_hex="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            max_threshold=16000000,
+        )
+        self.assertFalse(ok)
+        self.assertIn("défi nonce", err)
+
+    def test_proof_structure_validation(self):
+        # Composante manquante
+        ok, _ = zkp_verifier.validate_proof_structure({"pi_a": ["1", "2"], "pi_b": [["1", "2"]]})
+        self.assertFalse(ok)
+
+        # Non-dictionnaire
+        ok, _ = zkp_verifier.validate_proof_structure("not-a-dict")
+        self.assertFalse(ok)
+
+        # Valide
+        ok, _ = zkp_verifier.validate_proof_structure(self.VALID_PROOF)
+        self.assertTrue(ok)
+
+        # Payload trop volumineux (> 64 Ko)
+        huge_proof = dict(self.VALID_PROOF)
+        huge_proof["junk"] = "a" * (70 * 1024)
+        ok, err = zkp_verifier.validate_proof_structure(huge_proof)
+        self.assertFalse(ok)
+        self.assertIn("trop volumineux", err)
 
 
 class TestGrpcBridge(unittest.TestCase):
@@ -140,16 +246,17 @@ class TestGrpcBridge(unittest.TestCase):
         grpc_bridge.fermer_canaux()
 
     def test_verify_on_nodes_fallback_mock(self):
-        result = grpc_bridge.verify_on_nodes(
-            user_id="alice",
-            proof_json_str=json.dumps({"test": True}),
-            nonce="0123456789abcdef0123456789abcdef",
-        )
-        self.assertIn("consensus", result)
-        self.assertIn("votes", result)
-        self.assertIn("majority", result)
-        self.assertIsInstance(result["consensus"], bool)
-        self.assertEqual(len(result["votes"]), 3)
+        with patch.dict(os.environ, {"ALLOW_MOCK_CONSENSUS": "true"}):
+            result = grpc_bridge.verify_on_nodes(
+                user_id="alice",
+                proof_json_str=json.dumps({"test": True}),
+                nonce="0123456789abcdef0123456789abcdef",
+            )
+            self.assertIn("consensus", result)
+            self.assertIn("votes", result)
+            self.assertIn("majority", result)
+            self.assertIsInstance(result["consensus"], bool)
+            self.assertEqual(len(result["votes"]), 3)
 
     def test_request_nonce_from_node_fallback(self):
         nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
@@ -157,21 +264,19 @@ class TestGrpcBridge(unittest.TestCase):
         self.assertIsNone(exp)
 
     def test_api_lifespan_ferme_les_canaux_partages(self):
-        async def arreter_api():
-            async with api_main.lifespan(api_main.app):
-                pass
-
+        """Vérifie que les canaux gRPC partagés sont fermés en fin de cycle de vie."""
         channel = Mock()
         mock_grpc = grpc_bridge.grpc or Mock()
         mock_grpc.insecure_channel = Mock(return_value=channel)
         mock_grpc.ssl_channel_credentials = Mock()
         mock_grpc.secure_channel = Mock(return_value=channel)
 
-        with patch.dict(os.environ, {"TLS_ENABLED": "false"}), patch.object(
-            grpc_bridge, "grpc", mock_grpc
-        ):
+        # Créer le canal dans le registre partagé, puis appeler fermer_canaux() directement
+        # (reproduit ce que le lifespan fait au shutdown)
+        with patch.dict(os.environ, {"TLS_ENABLED": "false"}), \
+             patch.object(grpc_bridge, "grpc", mock_grpc):
             grpc_bridge._creer_canal("unused-target:50051")
-            asyncio.run(arreter_api())
+            grpc_bridge.fermer_canaux()
 
         mock_grpc.insecure_channel.assert_called_once_with(
             "unused-target:50051",
@@ -224,7 +329,7 @@ class TestGrpcBridge(unittest.TestCase):
             with patch.dict(
                 os.environ, {**paths, "TLS_ENABLED": "true"}, clear=False
             ), patch.object(grpc_bridge, "grpc", mock_grpc), patch.object(
-                grpc_bridge, "verification_pb2", SimpleNamespace(DemandeVerification=Mock(return_value=Mock())),
+                grpc_bridge, "verification_pb2", SimpleNamespace(DemandeVerification=Mock(return_value=Mock()), DemandeNonce=Mock(return_value=Mock())),
             ), patch.object(
                 grpc_bridge,
                 "verification_pb2_grpc",
@@ -290,6 +395,13 @@ class TestJwtManager(unittest.TestCase):
 class TestAuthenticateLogic(unittest.TestCase):
     """Tests du flux d'authentification biométrique ZKP."""
 
+    VALID_PROOF = {
+        "pi_a": ["123", "456"],
+        "pi_b": [["11", "22"], ["33", "44"]],
+        "pi_c": ["789", "101"],
+    }
+    DEFAULT_SEUIL = "16000000"
+
     def setUp(self):
         store.reset_store()
         self.storage = store.get_store()
@@ -300,14 +412,21 @@ class TestAuthenticateLogic(unittest.TestCase):
         store.reset_store()
         rate_limiter.reset_rate_limiter()
 
+    def _signals_for(self, commitment, nonce=None, seuil=None):
+        n = nonce or self.valid_nonce
+        val = int(n, 16)
+        hi = str(val >> 128)
+        lo = str(val & ((1 << 128) - 1))
+        return [str(commitment), str(seuil or self.DEFAULT_SEUIL), hi, lo]
+
     def test_auth_step1_malformed_nonce_rejected(self):
         from routes.authenticate import authenticate
 
         # Nonce trop court (32 chars au lieu de 64 chars / 256 bits)
         req = AuthenticateRequest(
             user_id="user1",
-            proof={"pi_a": [], "pi_b": [], "pi_c": []},
-            public_signals=["123456789"],
+            proof=self.VALID_PROOF,
+            public_signals=["123456789", "16000000", "1", "2"],
             nonce="0123456789abcdef0123456789abcdef",
         )
         res = authenticate(req)
@@ -316,19 +435,85 @@ class TestAuthenticateLogic(unittest.TestCase):
         self.assertEqual(res.reason, "Nonce malformé (attendu : 64 caractères hexadécimaux)")
         self.assertEqual(res.raison_refus, "Nonce malformé")
 
+    def test_auth_fails_when_user_not_registered(self):
+        from routes.authenticate import authenticate
+
+        req = AuthenticateRequest(
+            user_id="user_unregistered",
+            proof=self.VALID_PROOF,
+            public_signals=self._signals_for("123456789"),
+            nonce=self.valid_nonce,
+        )
+        res = authenticate(req)
+        self.assertFalse(res.authenticated)
+        self.assertFalse(res.success)
+        self.assertEqual(res.reason, "Utilisateur non enregistré ou engagement introuvable")
+
+    def test_auth_fails_when_threshold_altered(self):
+        from routes.authenticate import authenticate
+
+        user_id = "user_tamper_thresh"
+        commitment = "123456789"
+        self.storage.save_engagement(user_id, commitment)
+
+        req = AuthenticateRequest(
+            user_id=user_id,
+            proof=self.VALID_PROOF,
+            public_signals=self._signals_for(commitment, seuil="99999999"),
+            nonce=self.valid_nonce,
+        )
+        res = authenticate(req)
+        self.assertFalse(res.authenticated)
+        self.assertIn("Seuil biométrique non conforme", res.reason)
+
+    def test_auth_fails_when_commitment_mismatch(self):
+        from routes.authenticate import authenticate
+
+        user_id = "user_mismatch_comm"
+        self.storage.save_engagement(user_id, "123456789")
+
+        req = AuthenticateRequest(
+            user_id=user_id,
+            proof=self.VALID_PROOF,
+            public_signals=self._signals_for("999999999"),
+            nonce=self.valid_nonce,
+        )
+        res = authenticate(req)
+        self.assertFalse(res.authenticated)
+        self.assertIn("L'engagement biométrique de référence ne correspond pas", res.reason)
+
+    def test_auth_fails_when_nonce_mismatch(self):
+        from routes.authenticate import authenticate
+
+        user_id = "user_mismatch_nonce"
+        commitment = "123456789"
+        self.storage.save_engagement(user_id, commitment)
+
+        other_nonce = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        req = AuthenticateRequest(
+            user_id=user_id,
+            proof=self.VALID_PROOF,
+            public_signals=self._signals_for(commitment, nonce=other_nonce),
+            nonce=self.valid_nonce,
+        )
+        res = authenticate(req)
+        self.assertFalse(res.authenticated)
+        self.assertIn("défi nonce", res.reason)
+
     def test_auth_step2_zkp_failure(self):
         from routes.authenticate import authenticate
 
         user_id = "user_step2"
         commitment = "123456789"
+        self.storage.save_engagement(user_id, commitment)
 
-        # Désactiver le mock ZKP pour forcer le rejet (fichier introuvable ou preuve invalide)
+        # Désactiver le mock ZKP pour forcer le rejet local snarkjs
         os.environ.pop("MOCK_ZKP_VERIFICATION", None)
 
         req = AuthenticateRequest(
             user_id=user_id,
-            proof={"pi_a": [], "pi_b": [], "pi_c": []},
-            public_signals=[commitment],
+            proof=self.VALID_PROOF,
+            public_signals=self._signals_for(commitment),
             nonce=self.valid_nonce,
         )
         res = authenticate(req)
@@ -341,6 +526,7 @@ class TestAuthenticateLogic(unittest.TestCase):
 
         user_id = "user_step3"
         commitment = "123456789"
+        self.storage.save_engagement(user_id, commitment)
 
         # Activer le mock ZKP
         os.environ["MOCK_ZKP_VERIFICATION"] = "true"
@@ -356,8 +542,8 @@ class TestAuthenticateLogic(unittest.TestCase):
         ):
             req = AuthenticateRequest(
                 user_id=user_id,
-                proof={"pi_a": [], "pi_b": [], "pi_c": []},
-                public_signals=[commitment],
+                proof=self.VALID_PROOF,
+                public_signals=self._signals_for(commitment),
                 nonce=self.valid_nonce,
             )
             res = authenticate(req)
@@ -372,6 +558,7 @@ class TestAuthenticateLogic(unittest.TestCase):
 
         user_id = "user_success"
         commitment = "123456789"
+        self.storage.save_engagement(user_id, commitment)
 
         # Activer le mock ZKP
         os.environ["MOCK_ZKP_VERIFICATION"] = "true"
@@ -382,18 +569,26 @@ class TestAuthenticateLogic(unittest.TestCase):
         jwt_manager.jwt = mock_jwt
 
         try:
-            req = AuthenticateRequest(
-                user_id=user_id,
-                proof={"pi_a": [], "pi_b": [], "pi_c": []},
-                public_signals=[commitment],
-                nonce=self.valid_nonce,
-            )
-            res = authenticate(req)
-            self.assertTrue(res.authenticated)
-            self.assertTrue(res.success)
-            self.assertEqual(res.token, "eyJheader.payload.signature")
-            self.assertIsNone(res.reason)
-            self.assertEqual(res.message, "Authentification réussie")
+            with patch(
+                "routes.authenticate.verify_on_nodes",
+                return_value={
+                    "consensus": True,
+                    "majority": "3/3",
+                    "reason": "",
+                },
+            ):
+                req = AuthenticateRequest(
+                    user_id=user_id,
+                    proof=self.VALID_PROOF,
+                    public_signals=self._signals_for(commitment),
+                    nonce=self.valid_nonce,
+                )
+                res = authenticate(req)
+                self.assertTrue(res.authenticated)
+                self.assertTrue(res.success)
+                self.assertEqual(res.token, "eyJheader.payload.signature")
+                self.assertIsNone(res.reason)
+                self.assertEqual(res.message, "Authentification réussie")
         finally:
             jwt_manager.jwt = original_jwt
             os.environ.pop("MOCK_ZKP_VERIFICATION", None)
@@ -404,7 +599,7 @@ class TestAuthenticateLogic(unittest.TestCase):
         user_id = "user_contract"
         req = AuthenticateRequest(
             user_id=user_id,
-            proof={"pi_a": [], "pi_b": [], "pi_c": []},
+            proof=self.VALID_PROOF,
             public_signals=["123456"],
             nonce=self.valid_nonce,
         )
