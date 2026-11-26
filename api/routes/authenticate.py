@@ -22,7 +22,7 @@ try:
     from services.grpc_bridge import verify_on_nodes
     from services.jwt_manager import generate_token
     from services.rate_limiter import enforce_rate_limit
-    from services.store import get_commitment
+    from services.store import get_commitment, is_service_authorized
     from services.zkp_verifier import (
         DEFAULT_SEUIL_MAX,
         validate_public_signals_integrity,
@@ -33,7 +33,7 @@ except ImportError:
     from api.services.grpc_bridge import verify_on_nodes
     from api.services.jwt_manager import generate_token
     from api.services.rate_limiter import enforce_rate_limit
-    from api.services.store import get_commitment
+    from api.services.store import get_commitment, is_service_authorized
     from api.services.zkp_verifier import (
         DEFAULT_SEUIL_MAX,
         validate_public_signals_integrity,
@@ -171,9 +171,20 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
             message="Échec de l'authentification : le quorum de vérification n'a pas été atteint.",
         )
 
-    # Étape 5 : Génération et émission du jeton d'accès JWT
+    # Étape 5 : Vérification d'autorisation de service et génération du jeton JWT
+    service_cible = getattr(payload, "service_cible", None) or None
+    if service_cible and not is_service_authorized(user_id, service_cible):
+        logger.warning("[%s] Échec auth : accès au service '%s' non autorisé.", user_id, service_cible)
+        return AuthenticateResponse(
+            success=False,
+            authenticated=False,
+            reason=f"Accès au service '{service_cible}' non autorisé",
+            raison_refus="Accès service refusé",
+            message="Échec de l'authentification : accès au service cible non autorisé.",
+        )
+
     try:
-        token = generate_token(user_id=user_id)
+        token = generate_token(user_id=user_id, audience=service_cible)
     except Exception as exc:
         logger.error("[%s] Erreur lors de la génération du JWT : %s", user_id, type(exc).__name__)
         raise HTTPException(

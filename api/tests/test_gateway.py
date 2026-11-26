@@ -370,26 +370,204 @@ class TestGrpcBridge(unittest.TestCase):
             channel.close.assert_called_once_with()
 
 
-class TestJwtManager(unittest.TestCase):
-    """Tests pour le gestionnaire de tokens JWT."""
+def _build_hs256_jwt_shim():
+    """Shim HS256 complet compatible PyJWT pour exécution sans dépendance externe."""
+    import base64
+    import hashlib
+    import hmac
 
-    def test_jwt_generation_and_verification_mocked(self):
-        from services import jwt_manager
+    class InvalidTokenError(Exception):
+        pass
 
-        mock_jwt = Mock()
-        mock_jwt.encode.return_value = "eyJfake.jwt.token"
-        mock_jwt.decode.return_value = {"user_id": "alice", "exp": 9999999999}
-        original_jwt = jwt_manager.jwt
+    class ExpiredSignatureError(InvalidTokenError):
+        pass
+
+    class InvalidIssuerError(InvalidTokenError):
+        pass
+
+    class InvalidAudienceError(InvalidTokenError):
+        pass
+
+    class MissingRequiredClaimError(InvalidTokenError):
+        pass
+
+    def _b64enc(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+    def _b64dec(data: str) -> bytes:
+        padding = "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(data + padding)
+
+    def encode(payload, key, algorithm="HS256"):
+        header = _b64enc(json.dumps({"alg": algorithm, "typ": "JWT"}, separators=(",", ":")).encode())
+        body = _b64enc(json.dumps(payload, separators=(",", ":")).encode())
+        signing_input = f"{header}.{body}".encode()
+        sig = hmac.new(key.encode(), signing_input, hashlib.sha256).digest()
+        return f"{header}.{body}.{_b64enc(sig)}"
+
+    def decode(token, key, algorithms=None, issuer=None, audience=None, options=None):
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise InvalidTokenError("Format JWT invalide")
+        header_b64, body_b64, sig_b64 = parts
+        signing_input = f"{header_b64}.{body_b64}".encode()
+        expected_sig = hmac.new(key.encode(), signing_input, hashlib.sha256).digest()
         try:
-            jwt_manager.jwt = mock_jwt
-            token = jwt_manager.generate_token("alice")
-            self.assertEqual(token, "eyJfake.jwt.token")
+            actual_sig = _b64dec(sig_b64)
+        except Exception as exc:
+            raise InvalidTokenError("Signature illisible") from exc
+        if not hmac.compare_digest(expected_sig, actual_sig):
+            raise InvalidTokenError("Signature invalide")
 
-            payload = jwt_manager.verify_token(token)
+        try:
+            payload = json.loads(_b64dec(body_b64).decode())
+        except Exception as exc:
+            raise InvalidTokenError("Payload illisible") from exc
+
+        req = (options or {}).get("require", [])
+        for claim in req:
+            if claim not in payload:
+                raise MissingRequiredClaimError(claim)
+
+        if "exp" in payload and float(payload["exp"]) < time.time():
+            raise ExpiredSignatureError("Token expiré")
+        if issuer is not None and payload.get("iss") != issuer:
+            raise InvalidIssuerError("Émetteur invalide")
+        if audience is not None and payload.get("aud") != audience:
+            raise InvalidAudienceError("Audience invalide")
+        return payload
+
+    return SimpleNamespace(
+        encode=encode,
+        decode=decode,
+        InvalidTokenError=InvalidTokenError,
+        ExpiredSignatureError=ExpiredSignatureError,
+        InvalidIssuerError=InvalidIssuerError,
+        InvalidAudienceError=InvalidAudienceError,
+        MissingRequiredClaimError=MissingRequiredClaimError,
+    )
+
+
+class TestJwtManager(unittest.TestCase):
+    """Tests complets pour le gestionnaire de tokens JWT et la gestion des sessions."""
+
+    def setUp(self):
+        from services import jwt_manager
+        store.reset_store()
+        jwt_manager.reset_blacklist()
+        self._orig_jwt = jwt_manager.jwt
+        if jwt_manager.jwt is None:
+            jwt_manager.jwt = _build_hs256_jwt_shim()
+
+    def tearDown(self):
+        from services import jwt_manager
+        jwt_manager.jwt = self._orig_jwt
+        jwt_manager.reset_blacklist()
+        store.reset_store()
+
+    def test_jwt_valid_claims(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice", audience="facein-web")
+            payload = jwt_manager.verify_token(token, audience="facein-web")
             self.assertIsNotNone(payload)
-            self.assertEqual(payload["user_id"], "alice")
-        finally:
-            jwt_manager.jwt = original_jwt
+            self.assertEqual(payload["sub"], "alice")
+            self.assertEqual(payload["iss"], "facein-api")
+            self.assertEqual(payload["aud"], "facein-web")
+            self.assertIn("iat", payload)
+            self.assertIn("exp", payload)
+            self.assertIn("jti", payload)
+            self.assertEqual(payload["ver"], "1")
+
+    def test_jwt_expired_rejected(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice", expiration_seconds=-10)
+            self.assertIsNone(jwt_manager.verify_token(token))
+
+    def test_jwt_tampered_rejected(self):
+        from services import jwt_manager
+        import base64
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice")
+            h, _, s = token.split(".")
+            tampered_body = base64.urlsafe_b64encode(
+                json.dumps({"sub": "admin", "iss": "facein-api", "aud": "facein-web",
+                            "iat": int(time.time()), "exp": int(time.time()) + 3600, "jti": "x"}).encode()
+            ).rstrip(b"=").decode()
+            self.assertIsNone(jwt_manager.verify_token(f"{h}.{tampered_body}.{s}"))
+
+    def test_jwt_wrong_signature_rejected(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "cle-a-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice")
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "cle-b-autre-secret-256-bits-minimum"}):
+            self.assertIsNone(jwt_manager.verify_token(token))
+
+    def test_jwt_wrong_issuer_rejected(self):
+        from services import jwt_manager
+        now = int(time.time())
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            forged = jwt_manager.jwt.encode(
+                {"sub": "alice", "iss": "evil-issuer", "aud": "facein-web",
+                 "iat": now, "exp": now + 3600, "jti": "jti-1"},
+                "test-secret-key-256-bits-minimum-ok",
+                algorithm="HS256",
+            )
+            self.assertIsNone(jwt_manager.verify_token(forged))
+
+    def test_jwt_wrong_audience_rejected(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice", audience="facein-mobile")
+            self.assertIsNone(jwt_manager.verify_token(token, audience="facein-web"))
+
+    def test_jwt_revoked_rejected(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice", audience="facein-web")
+            payload = jwt_manager.verify_token(token, audience="facein-web")
+            self.assertIsNotNone(payload)
+
+            self.assertTrue(jwt_manager.revoquer_token(token, audience="facein-web"))
+            self.assertIsNone(jwt_manager.verify_token(token, audience="facein-web"))
+            self.assertTrue(store.is_jti_revoked(payload["jti"]))
+
+    def test_jwt_missing_key_in_production_raises(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_ENV": "production", "JWT_SECRET_KEY": ""}):
+            with self.assertRaises(RuntimeError):
+                jwt_manager.generate_token("alice")
+
+    def test_jwt_key_rotation(self):
+        from services import jwt_manager
+        old_key = "old-secret-key-256-bits-minimum-ok"
+        new_key = "new-secret-key-256-bits-minimum-ok"
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": old_key}):
+            old_token = jwt_manager.generate_token("alice")
+
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": new_key, "JWT_SECRET_KEY_PREVIOUS": old_key}):
+            # L'ancien token reste valide pendant la rotation
+            self.assertIsNotNone(jwt_manager.verify_token(old_token))
+            # Un nouveau token est signé avec la nouvelle clé
+            new_token = jwt_manager.generate_token("bob")
+            self.assertIsNotNone(jwt_manager.verify_token(new_token))
+
+        # Sans l'ancienne clé configurée, l'ancien token est rejeté
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": new_key, "JWT_SECRET_KEY_PREVIOUS": ""}):
+            self.assertIsNone(jwt_manager.verify_token(old_token))
+            self.assertIsNotNone(jwt_manager.verify_token(new_token))
+
+    def test_jwt_service_authorization(self):
+        from services import jwt_manager
+        with patch.dict(os.environ, {"JWT_SECRET_KEY": "test-secret-key-256-bits-minimum-ok"}):
+            token = jwt_manager.generate_token("alice", audience="facein-partner")
+            store.set_service_authorization("alice", "facein-partner", "actif")
+            self.assertIsNotNone(jwt_manager.verify_service_access(token, "facein-partner"))
+
+            # Révocation de l'autorisation pour ce service
+            store.set_service_authorization("alice", "facein-partner", "revoque")
+            self.assertIsNone(jwt_manager.verify_service_access(token, "facein-partner"))
 
 
 class TestAuthenticateLogic(unittest.TestCase):

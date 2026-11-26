@@ -163,7 +163,7 @@ class VerificationService(_VerificationServicer):
     ``RecupererDonneeAide`` répond « utilisateur inconnu ».
     """
 
-    def __init__(self, node_id, nonces, decider_fn, fabriquer_token, store=None):
+    def __init__(self, node_id, nonces, decider_fn, fabriquer_token=None, store=None):
         self.node_id = node_id
         self._nonces = nonces
         self._decider = decider_fn          # demande -> bool
@@ -364,7 +364,7 @@ class VerificationService(_VerificationServicer):
                 score_anomalie=0,
             )
 
-        token = self._fabriquer_token(request.utilisateur_id)
+        token = self._fabriquer_token(request.utilisateur_id) if self._fabriquer_token else ""
         if verification_pb2:
             return verification_pb2.ReponseVerification(
                 accepte=True,
@@ -508,7 +508,7 @@ def start_grpc_server(
     verifier,
     nonces,
     decider_fn,
-    fabriquer_token,
+    fabriquer_token=None,
 ):
     """Démarre le service gRPC et retourne son serveur actif.
 

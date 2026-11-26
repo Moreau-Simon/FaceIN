@@ -10,7 +10,6 @@ Important :
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
-import secrets
 import signal
 from threading import Event
 
@@ -173,7 +172,6 @@ def main():
             verifier,
             nonces,
             decider_fn,
-            lambda utilisateur_id: secrets.token_urlsafe(32),
         )
     except ErreurDemarrageServeur as exc:
         vote_executor.close()

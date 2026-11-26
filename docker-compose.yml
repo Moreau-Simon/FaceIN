@@ -119,6 +119,9 @@ services:
         condition: service_healthy
     environment:
       - STORE_BACKEND=postgres
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-facein-dev-jwt-secret-key-not-for-prod}
+      - JWT_ENV=${JWT_ENV:-development}
+      - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-3600}
       - TLS_ENABLED=true
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/api-gateway.crt

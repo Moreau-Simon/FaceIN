@@ -32,6 +32,8 @@ class MemoryStore:
         self.engagements: Dict[str, Dict[str, Any]] = {}
         self.nonces: Dict[str, Dict[str, Any]] = {}
         self.users: set = set()
+        self.revoked_jtis: Dict[str, float] = {}
+        self.service_authorizations: Dict[tuple, str] = {}
 
     def ping(self) -> bool:
         return True
@@ -43,6 +45,8 @@ class MemoryStore:
         self.engagements.clear()
         self.nonces.clear()
         self.users.clear()
+        self.revoked_jtis.clear()
+        self.service_authorizations.clear()
 
     def user_exists(self, user_id: str) -> bool:
         return user_id in self.users or user_id in self.engagements
@@ -97,6 +101,36 @@ class MemoryStore:
         for n in expired:
             del self.nonces[n]
         return len(expired)
+
+    # --- Révocation JWT & Autorisations par service ---
+    def save_revoked_jti(self, jti: str, expires_at: float) -> None:
+        self.revoked_jtis[jti] = float(expires_at)
+
+    def is_jti_revoked(self, jti: str, now: Optional[float] = None) -> bool:
+        exp = self.revoked_jtis.get(jti)
+        if exp is None:
+            return False
+        current_time = time.time() if now is None else float(now)
+        if exp < current_time:
+            del self.revoked_jtis[jti]
+            return False
+        return True
+
+    def set_service_authorization(
+        self, user_id: str, service_name: str, statut: str = "actif"
+    ) -> None:
+        self.service_authorizations[(user_id, service_name)] = statut
+
+    def is_service_authorized(self, user_id: str, service_name: str) -> bool:
+        statut = self.service_authorizations.get((user_id, service_name))
+        if statut == "revoque":
+            return False
+        strict = os.getenv("STRICT_SERVICE_AUTH", "false").strip().lower() in {
+            "1", "true", "yes"
+        }
+        if strict:
+            return statut == "actif"
+        return True
 
 
 # =====================================================================
@@ -289,6 +323,108 @@ class PostgresStore:
             )
             return cur.rowcount
 
+    # --- Révocation JWT & Autorisations par service ---
+    def save_revoked_jti(self, jti: str, expires_at: float) -> None:
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tokens_revoques (
+                    jti VARCHAR(255) PRIMARY KEY,
+                    expires_at DOUBLE PRECISION NOT NULL
+                );
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO tokens_revoques (jti, expires_at)
+                VALUES (%s, %s)
+                ON CONFLICT (jti) DO UPDATE SET expires_at = EXCLUDED.expires_at;
+                """,
+                (jti, float(expires_at)),
+            )
+
+    def is_jti_revoked(self, jti: str, now: Optional[float] = None) -> bool:
+        current_time = time.time() if now is None else float(now)
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tokens_revoques (
+                    jti VARCHAR(255) PRIMARY KEY,
+                    expires_at DOUBLE PRECISION NOT NULL
+                );
+                """
+            )
+            cur.execute(
+                "SELECT expires_at FROM tokens_revoques WHERE jti = %s;",
+                (jti,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            if float(row[0]) < current_time:
+                cur.execute("DELETE FROM tokens_revoques WHERE jti = %s;", (jti,))
+                return False
+            return True
+
+    def set_service_authorization(
+        self, user_id: str, service_name: str, statut: str = "actif"
+    ) -> None:
+        if statut not in ("actif", "revoque"):
+            raise ValueError(f"Statut d'autorisation invalide : '{statut}'")
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO utilisateurs (nom)
+                VALUES (%s)
+                ON CONFLICT (nom) DO UPDATE SET nom = EXCLUDED.nom
+                RETURNING id;
+                """,
+                (user_id,),
+            )
+            user_uuid = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO services (nom, cle_publique)
+                VALUES (%s, '')
+                ON CONFLICT (nom) DO UPDATE SET nom = EXCLUDED.nom
+                RETURNING id;
+                """,
+                (service_name,),
+            )
+            service_uuid = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO autorisations_service (utilisateur_id, service_id, statut)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (utilisateur_id, service_id) DO UPDATE
+                SET statut = EXCLUDED.statut;
+                """,
+                (user_uuid, service_uuid, statut),
+            )
+
+    def is_service_authorized(self, user_id: str, service_name: str) -> bool:
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.statut
+                FROM autorisations_service a
+                JOIN utilisateurs u ON u.id = a.utilisateur_id
+                JOIN services s ON s.id = a.service_id
+                WHERE u.nom = %s AND s.nom = %s
+                LIMIT 1;
+                """,
+                (user_id, service_name),
+            )
+            row = cur.fetchone()
+            if row and row[0] == "revoque":
+                return False
+            strict = os.getenv("STRICT_SERVICE_AUTH", "false").strip().lower() in {
+                "1", "true", "yes"
+            }
+            if strict:
+                return bool(row and row[0] == "actif")
+            return True
+
 
 # =====================================================================
 # Factory et gestion du cycle de vie
@@ -375,3 +511,21 @@ def save_nonce(nonce: str, user_id: str, expires_at: float) -> None:
 
 def verify_nonce(nonce: str, user_id: str) -> bool:
     return get_store().consume_nonce(nonce, user_id)
+
+
+def save_revoked_jti(jti: str, expires_at: float) -> None:
+    get_store().save_revoked_jti(jti, expires_at)
+
+
+def is_jti_revoked(jti: str) -> bool:
+    return get_store().is_jti_revoked(jti)
+
+
+def set_service_authorization(
+    user_id: str, service_name: str, statut: str = "actif"
+) -> None:
+    get_store().set_service_authorization(user_id, service_name, statut)
+
+
+def is_service_authorized(user_id: str, service_name: str) -> bool:
+    return get_store().is_service_authorized(user_id, service_name)
