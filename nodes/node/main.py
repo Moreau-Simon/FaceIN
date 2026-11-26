@@ -11,7 +11,7 @@ Important :
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import signal
-from threading import Event
+from threading import Event, Thread
 
 import grpc
 
@@ -19,6 +19,7 @@ from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
 from consensus.validation import VoteExecutor, decider, VerificateurZKP
+from merkle.sync import synchroniser_tous_les_pairs
 from network.peer_client import demander_vote, envoyer_heartbeat, fermer_canaux
 from network.peers import PeerRegistry, formater_adresse_pair
 from network.server import ErreurDemarrageServeur, start_grpc_server
@@ -172,6 +173,7 @@ def main():
             verifier,
             nonces,
             decider_fn,
+            peers=config["peers"],
         )
     except ErreurDemarrageServeur as exc:
         vote_executor.close()
@@ -190,6 +192,31 @@ def main():
 
     def demander_arret(_signum, _frame):
         arret_demande.set()
+
+    def _boucle_sync_merkle():
+        intervalle = config.get("intervalle_sec_merkle", 30)
+        while not arret_demande.wait(intervalle):
+            try:
+                pairs_actifs = registre.get_non_offline_peers()
+                if pairs_actifs:
+                    synchroniser_tous_les_pairs(
+                        node_id=config["node_id"],
+                        peers=pairs_actifs,
+                        store=store,
+                        timeout_sec=config.get("timeout_sec_heartbeat", 2),
+                    )
+            except Exception:
+                logger.exception(
+                    "[%s] Erreur inattendue dans la boucle de synchronisation Merkle",
+                    config["node_id"],
+                )
+
+    thread_merkle = Thread(
+        target=_boucle_sync_merkle,
+        name=f"merkle-sync-{config['node_id']}",
+        daemon=True,
+    )
+    thread_merkle.start()
 
     try:
         for signe in signaux:

@@ -142,11 +142,24 @@ class EngagementsStore:
         raison: str = "",
         timestamp: Optional[float] = None,
     ) -> bool:
-        """Révoque un engagement existant de façon idempotente."""
+        """Révoque un engagement existant de façon idempotente.
+
+        Si l'utilisateur n'est pas encore présent localement (ex. nœud ayant manqué
+        l'inscription), crée tout de même une entrée marquée ``revoque`` afin
+        d'empêcher toute résurrection lors d'une synchronisation ultérieure.
+        """
         now = time.time() if timestamp is None else float(timestamp)
         with self._lock:
             current = self._engagements.get(user_id)
             if not current:
+                self._engagements[user_id] = {
+                    "commitment": "",
+                    "statut": "revoque",
+                    "raison": str(raison),
+                    "updated_at": now,
+                    "version": 1,
+                }
+                self._persist()
                 return False
 
             if current.get("statut") == "revoque":
@@ -154,10 +167,27 @@ class EngagementsStore:
 
             current["statut"] = "revoque"
             current["raison"] = str(raison)
-            current["updated_at"] = now
+            current["updated_at"] = max(now, float(current.get("updated_at", 0.0)))
             current["version"] = current.get("version", 1) + 1
             self._persist()
             return True
+
+    def last_revocation_timestamp(self) -> int:
+        """Retourne le timestamp Unix (ms) de la dernière révocation connue (0 si aucune)."""
+        with self._lock:
+            ts_max = 0.0
+            for v in self._engagements.values():
+                if v.get("statut") == "revoque":
+                    ts_max = max(ts_max, float(v.get("updated_at", 0.0)))
+            return int(ts_max * 1000) if ts_max > 0 else 0
+
+    def last_update_timestamp(self) -> int:
+        """Retourne le timestamp Unix (ms) de la dernière mise à jour du store."""
+        with self._lock:
+            ts_max = 0.0
+            for v in self._engagements.values():
+                ts_max = max(ts_max, float(v.get("updated_at", 0.0)))
+            return int(ts_max * 1000) if ts_max > 0 else 0
 
     def get(self, user_id: str) -> Optional[str]:
         """Retourne l'engagement actif de l'utilisateur s'il existe et n'est pas révoqué."""
@@ -195,7 +225,11 @@ class EngagementsStore:
             )
 
     def sync_batch(self, entries: List[Dict[str, Any]]) -> int:
-        """Synchronise un lot d'engagements (rattrapage de nœud) de façon idempotente."""
+        """Synchronise un lot d'engagements (rattrapage de nœud) de façon idempotente.
+
+        Garantit qu'un engagement révoqué ne peut jamais réapparaître comme ``actif``
+        à cause d'une ancienne copie (anti-résurrection).
+        """
         nb_updates = 0
         with self._lock:
             for entry in entries:
@@ -206,8 +240,21 @@ class EngagementsStore:
                 ver = int(entry.get("version", 1))
 
                 current = self._engagements.get(uid)
-                if current and current.get("updated_at", 0.0) >= ts:
-                    continue
+                if current:
+                    # Anti-résurrection : une copie active pour un commitment déjà révoqué est ignorée
+                    if current.get("statut") == "revoque" and statut == "actif":
+                        if not current.get("commitment") or current.get("commitment") == comm:
+                            continue
+                        if ver <= int(current.get("version", 1)):
+                            continue
+
+                    # Une révocation gagne sur un actif de même ou plus petite version
+                    if statut == "revoque" and current.get("statut") == "actif":
+                        pass
+                    elif int(current.get("version", 1)) > ver:
+                        continue
+                    elif int(current.get("version", 1)) == ver and float(current.get("updated_at", 0.0)) >= ts:
+                        continue
 
                 self._engagements[uid] = {
                     "commitment": comm,

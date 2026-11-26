@@ -36,6 +36,7 @@ message NoeudMerkle {
   string hash = 2;
   bool est_feuille = 3;
   string utilisateur_id = 4;   // renseigné uniquement si feuille
+  string payload_json = 5;     // métadonnées canoniques de la feuille pour resync ciblée
 }
 
 message PingNoeud {

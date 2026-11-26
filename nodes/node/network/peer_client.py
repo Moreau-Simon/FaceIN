@@ -16,10 +16,13 @@ except ImportError:
 try:
     import consensus_pb2
     import consensus_pb2_grpc
+    import revocation_pb2
+    import revocation_pb2_grpc
     import sync_pb2
     import sync_pb2_grpc
 except ImportError:
     consensus_pb2 = consensus_pb2_grpc = None
+    revocation_pb2 = revocation_pb2_grpc = None
     sync_pb2 = sync_pb2_grpc = None
 from network.peers import formater_adresse_pair
 
@@ -151,3 +154,81 @@ def demander_vote(
         reponse.noeud_id,
         reponse.vote == consensus_pb2.VOTE_POUR,
     )
+
+
+def echanger_racine(
+    host: str,
+    port: int,
+    node_id: str,
+    timeout_sec: float = 3.0,
+) -> tuple[str, int]:
+    """Récupère la racine de Merkle et l'horodatage de dernière mise à jour d'un pair."""
+    address = formater_adresse_pair(host, port)
+    channel = creer_canal_securise(address)
+    stub = sync_pb2_grpc.SyncServiceStub(channel)
+    reponse = stub.EchangerRacine(
+        sync_pb2.DemandeRacine(noeud_id=node_id),
+        timeout=timeout_sec,
+    )
+    return reponse.racine_hash, int(reponse.derniere_maj)
+
+
+def recuperer_branche(
+    host: str,
+    port: int,
+    chemin_branche: str,
+    timeout_sec: float = 3.0,
+):
+    """Récupère les nœuds enfants d'une branche Merkle auprès d'un pair."""
+    address = formater_adresse_pair(host, port)
+    channel = creer_canal_securise(address)
+    stub = sync_pb2_grpc.SyncServiceStub(channel)
+    reponse = stub.RecupererBranche(
+        sync_pb2.DemandeBranche(chemin_branche=chemin_branche),
+        timeout=timeout_sec,
+    )
+    return list(reponse.noeuds)
+
+
+def propager_revocation(
+    host: str,
+    port: int,
+    utilisateur_id: str,
+    engagement_id: str,
+    raison: str,
+    timestamp_revocation: int,
+    noeud_origine: str,
+    timeout_sec: float = 3.0,
+) -> tuple[bool, str]:
+    """Diffuse une révocation vers un pair et retourne l'accusé de réception."""
+    address = formater_adresse_pair(host, port)
+    channel = creer_canal_securise(address)
+    stub = revocation_pb2_grpc.RevocationServiceStub(channel)
+    reponse = stub.PropagerRevocation(
+        revocation_pb2.DemandeRevocation(
+            utilisateur_id=utilisateur_id,
+            engagement_id=engagement_id,
+            raison=raison,
+            timestamp_revocation=int(timestamp_revocation),
+            noeud_origine=noeud_origine,
+        ),
+        timeout=timeout_sec,
+    )
+    return bool(reponse.recu), str(reponse.noeud_id)
+
+
+def verifier_fraicheur_revocations(
+    host: str,
+    port: int,
+    node_id: str,
+    timeout_sec: float = 3.0,
+) -> tuple[int, bool]:
+    """Interroge un pair sur l'état de fraîcheur des révocations connues."""
+    address = formater_adresse_pair(host, port)
+    channel = creer_canal_securise(address)
+    stub = revocation_pb2_grpc.RevocationServiceStub(channel)
+    reponse = stub.VerifierFraicheur(
+        revocation_pb2.DemandeFraicheur(noeud_id=node_id),
+        timeout=timeout_sec,
+    )
+    return int(reponse.derniere_revocation_connue), bool(reponse.a_jour)

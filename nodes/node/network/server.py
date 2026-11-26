@@ -3,6 +3,7 @@ Serveur gRPC du noeud pour les échanges de synchronisation entre pairs,
 le consensus de vote et la vérification des preuves cryptographiques ZKP.
 """
 
+import json
 import logging
 import os
 import threading
@@ -24,18 +25,24 @@ try:
     import sync_pb2_grpc
     import consensus_pb2
     import consensus_pb2_grpc
+    import revocation_pb2
+    import revocation_pb2_grpc
     import verification_pb2
     import verification_pb2_grpc
 except ImportError:
     sync_pb2 = sync_pb2_grpc = None
     consensus_pb2 = consensus_pb2_grpc = None
+    revocation_pb2 = revocation_pb2_grpc = None
     verification_pb2 = verification_pb2_grpc = None
 
 _SyncServicer = sync_pb2_grpc.SyncServiceServicer if sync_pb2_grpc else object
 _ConsensusServicer = consensus_pb2_grpc.ConsensusServiceServicer if consensus_pb2_grpc else object
+_RevocationServicer = revocation_pb2_grpc.RevocationServiceServicer if revocation_pb2_grpc else object
 _VerificationServicer = verification_pb2_grpc.VerificationServiceServicer if verification_pb2_grpc else object
 
 from consensus.validation import empaqueter_preuve
+from merkle.tree import MerkleTree
+from network.peer_client import propager_revocation
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +92,64 @@ def charger_credentials_serveur():
 class SyncService(_SyncServicer):
     """Implémente le service de synchronisation exposé par le noeud."""
 
-    def __init__(self, node_id: str):
+    def __init__(self, node_id: str, store=None):
         self.node_id = node_id
+        self._store = store
+
+    def EchangerRacine(self, request, context):
+        """Retourne la racine de Merkle courante du magasin d'engagements."""
+        entries = self._store.all_entries() if self._store is not None else {}
+        arbre = MerkleTree(entries)
+        derniere_maj = (
+            self._store.last_update_timestamp()
+            if self._store is not None and hasattr(self._store, "last_update_timestamp")
+            else 0
+        )
+        if sync_pb2:
+            return sync_pb2.ReponseRacine(
+                racine_hash=arbre.root_hash,
+                derniere_maj=derniere_maj,
+            )
+        return SimpleNamespace(racine_hash=arbre.root_hash, derniere_maj=derniere_maj)
+
+    def RecupererBranche(self, request, context):
+        """Retourne les nœuds enfants (ou la feuille) pour un chemin donné."""
+        entries = self._store.all_entries() if self._store is not None else {}
+        arbre = MerkleTree(entries)
+        chemin = getattr(request, "chemin_branche", "") or ""
+        noeuds_arbre = arbre.get_branch(chemin)
+
+        proto_noeuds = []
+        for n in noeuds_arbre:
+            payload_str = (
+                json.dumps(n.payload, sort_keys=True, separators=(",", ":"))
+                if n.est_feuille and n.payload is not None
+                else ""
+            )
+            if sync_pb2:
+                proto_noeuds.append(
+                    sync_pb2.NoeudMerkle(
+                        chemin=n.chemin,
+                        hash=n.hash,
+                        est_feuille=n.est_feuille,
+                        utilisateur_id=n.utilisateur_id,
+                        payload_json=payload_str,
+                    )
+                )
+            else:
+                proto_noeuds.append(
+                    SimpleNamespace(
+                        chemin=n.chemin,
+                        hash=n.hash,
+                        est_feuille=n.est_feuille,
+                        utilisateur_id=n.utilisateur_id,
+                        payload_json=payload_str,
+                    )
+                )
+
+        if sync_pb2:
+            return sync_pb2.ReponseBranche(noeuds=proto_noeuds)
+        return SimpleNamespace(noeuds=proto_noeuds)
 
     def Heartbeat(self, request, context):
         """Confirme que le noeud répond aux appels gRPC."""
@@ -100,6 +163,69 @@ class SyncService(_SyncServicer):
             noeud_id=self.node_id,
             en_sante=True,
         )
+
+
+class RevocationService(_RevocationServicer):
+    """Service gRPC inter-nœuds pour la propagation et la fraîcheur des révocations."""
+
+    def __init__(self, node_id: str, store=None):
+        self.node_id = node_id
+        self._store = store
+        self._lock = threading.Lock()
+        self._accuses: dict[tuple[str, int], set[str]] = {}
+
+    def enregistrer_accuse(self, utilisateur_id: str, ts_ms: int, pair_id: str) -> None:
+        with self._lock:
+            self._accuses.setdefault((utilisateur_id, int(ts_ms)), set()).add(pair_id)
+
+    def obtenir_accuses(self, utilisateur_id: str, ts_ms: int) -> set[str]:
+        with self._lock:
+            return set(self._accuses.get((utilisateur_id, int(ts_ms)), set()))
+
+    def PropagerRevocation(self, request, context):
+        """Applique une révocation reçue d'un pair de façon idempotente et renvoie un accusé."""
+        utilisateur_id = getattr(request, "utilisateur_id", "") or ""
+        if not utilisateur_id:
+            if context and grpc:
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, "utilisateur_id requis")
+            if revocation_pb2:
+                return revocation_pb2.AccuseReception(recu=False, noeud_id=self.node_id)
+            return SimpleNamespace(recu=False, noeud_id=self.node_id)
+
+        raw_ts = getattr(request, "timestamp_revocation", 0) or 0
+        ts = float(raw_ts) / 1000.0 if raw_ts > 100_000_000_000 else float(raw_ts or time.time())
+        raison = getattr(request, "raison", "") or ""
+
+        if self._store is not None:
+            self._store.revoke(
+                user_id=utilisateur_id,
+                raison=raison,
+                timestamp=ts,
+            )
+
+        logger.info(
+            "[%s] Révocation propagée reçue pour '%s' depuis '%s'",
+            self.node_id,
+            utilisateur_id,
+            getattr(request, "noeud_origine", ""),
+        )
+        if revocation_pb2:
+            return revocation_pb2.AccuseReception(recu=True, noeud_id=self.node_id)
+        return SimpleNamespace(recu=True, noeud_id=self.node_id)
+
+    def VerifierFraicheur(self, request, context):
+        """Retourne l'horodatage de la dernière révocation connue localement."""
+        derniere = (
+            self._store.last_revocation_timestamp()
+            if self._store is not None and hasattr(self._store, "last_revocation_timestamp")
+            else 0
+        )
+        if revocation_pb2:
+            return revocation_pb2.ReponseFraicheur(
+                derniere_revocation_connue=derniere,
+                a_jour=True,
+            )
+        return SimpleNamespace(derniere_revocation_connue=derniere, a_jour=True)
 
 class ConsensusService(_ConsensusServicer):
     def __init__(self, node_id, verifier, max_cache: int = 1000):
@@ -163,12 +289,23 @@ class VerificationService(_VerificationServicer):
     ``RecupererDonneeAide`` répond « utilisateur inconnu ».
     """
 
-    def __init__(self, node_id, nonces, decider_fn, fabriquer_token=None, store=None):
+    def __init__(
+        self,
+        node_id,
+        nonces,
+        decider_fn,
+        fabriquer_token=None,
+        store=None,
+        peers=None,
+        revocation_service=None,
+    ):
         self.node_id = node_id
         self._nonces = nonces
         self._decider = decider_fn          # demande -> bool
         self._fabriquer_token = fabriquer_token
         self._store = store
+        self._peers = list(peers or [])
+        self._revocation_service = revocation_service
 
     def RecupererDonneeAide(self, request, context):
         """Retourne l'engagement cryptographique (Poseidon) de l'utilisateur.
@@ -458,6 +595,34 @@ class VerificationService(_VerificationServicer):
             request.utilisateur_id,
             ok,
         )
+        if self._peers and revocation_pb2_grpc is not None:
+            ts_ms = int(ts * 1000)
+            for peer in self._peers:
+                host = peer["host"] if isinstance(peer, dict) else peer.host
+                port = peer["port"] if isinstance(peer, dict) else peer.port
+                try:
+                    recu, pair_id = propager_revocation(
+                        host=host,
+                        port=port,
+                        utilisateur_id=request.utilisateur_id,
+                        engagement_id="",
+                        raison=request.raison or "",
+                        timestamp_revocation=ts_ms,
+                        noeud_origine=self.node_id,
+                        timeout_sec=2.0,
+                    )
+                    if recu and self._revocation_service is not None:
+                        self._revocation_service.enregistrer_accuse(
+                            request.utilisateur_id, ts_ms, pair_id
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "[%s] Échec propagation révocation vers %s:%s : %s",
+                        self.node_id,
+                        host,
+                        port,
+                        exc,
+                    )
         return verification_pb2.ReponseRevocationEngagement(
             succes=True,
             message="Engagement révoqué avec succès",
@@ -509,6 +674,7 @@ def start_grpc_server(
     nonces,
     decider_fn,
     fabriquer_token=None,
+    peers=None,
 ):
     """Démarre le service gRPC et retourne son serveur actif.
 
@@ -519,9 +685,10 @@ def start_grpc_server(
         futures.ThreadPoolExecutor(max_workers=10),
         options=GRPC_SERVER_OPTIONS,
     )
+    store = getattr(verifier, "store", None)
 
     sync_pb2_grpc.add_SyncServiceServicer_to_server(
-        SyncService(node_id),
+        SyncService(node_id, store=store),
         server,
     )
 
@@ -530,13 +697,22 @@ def start_grpc_server(
         server,
     )
 
+    revocation_service = RevocationService(node_id, store=store)
+    if revocation_pb2_grpc is not None:
+        revocation_pb2_grpc.add_RevocationServiceServicer_to_server(
+            revocation_service,
+            server,
+        )
+
     verification_pb2_grpc.add_VerificationServiceServicer_to_server(
         VerificationService(
             node_id,
             nonces,
             decider_fn,
             fabriquer_token,
-            store=getattr(verifier, "store", None),
+            store=store,
+            peers=peers,
+            revocation_service=revocation_service,
         ),
         server,
     )
