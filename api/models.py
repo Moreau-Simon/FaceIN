@@ -159,8 +159,13 @@ class ErrorResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    statut: str = Field("en_ligne", description="Statut global du service")
+    statut: str = Field("en_ligne", description="Statut global du service (en_ligne, degrade, critique)")
     service: str = Field("FaceIn API Gateway", description="Nom du service")
     version: str = Field("1.0.0", description="Version du service")
+    processus: str = Field("ok", description="État du processus API")
     stockage: str = Field(..., description="Type de backend de persistance actif (memory ou postgres)")
+    stockage_ok: bool = Field(True, description="Disponibilité du backend de stockage")
+    zkp_ok: bool = Field(True, description="Disponibilité du vérificateur ZKP (clé et moteur)")
     noeuds_configures: int = Field(..., description="Nombre de noeuds de vérification configurés")
+    noeuds_disponibles: int = Field(0, description="Nombre de noeuds joignables")
+    quorum_atteint: bool = Field(False, description="Indique si le quorum minimal (2/3) est disponible")

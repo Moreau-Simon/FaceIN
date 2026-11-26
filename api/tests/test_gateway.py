@@ -987,19 +987,52 @@ class TestStrictValidationAndSecurity(unittest.TestCase):
         self.assertTrue(options.get("allow_credentials"))
 
     def test_health_check_endpoint(self):
-        # Appel direct de la fonction health_check
-        res = api_main.health_check()
+        # Appel direct de la fonction health_check avec quorum simulé (2/3)
+        with patch(
+            "api.main.verifier_sante_noeuds",
+            return_value={"noeuds_configures": 3, "noeuds_disponibles": 2, "quorum_atteint": True},
+        ):
+            res = api_main.health_check()
         self.assertEqual(res.statut, "en_ligne")
         self.assertEqual(res.service, "FaceIn API Gateway")
         self.assertIn(res.stockage, ("memory", "postgres"))
+        self.assertTrue(res.stockage_ok)
+        self.assertTrue(res.zkp_ok)
+        self.assertEqual(res.noeuds_disponibles, 2)
+        self.assertTrue(res.quorum_atteint)
         self.assertGreaterEqual(res.noeuds_configures, 3)
 
     def test_health_check_endpoint_degraded_when_store_down(self):
         mock_broken_store = Mock()
         mock_broken_store.ping.return_value = False
-        with patch("api.main.get_store", return_value=mock_broken_store):
+        with patch("api.main.get_store", return_value=mock_broken_store), patch(
+            "api.main.verifier_sante_noeuds",
+            return_value={"noeuds_configures": 3, "noeuds_disponibles": 3, "quorum_atteint": True},
+        ):
             res = api_main.health_check()
             self.assertEqual(res.statut, "degrade")
+            self.assertFalse(res.stockage_ok)
+
+    def test_health_check_degraded_when_quorum_lost(self):
+        with patch(
+            "api.main.verifier_sante_noeuds",
+            return_value={"noeuds_configures": 3, "noeuds_disponibles": 1, "quorum_atteint": False},
+        ):
+            res = api_main.health_check()
+            self.assertEqual(res.statut, "degrade")
+            self.assertFalse(res.quorum_atteint)
+            self.assertEqual(res.noeuds_disponibles, 1)
+
+    def test_health_check_degraded_when_zkp_key_missing(self):
+        with patch.dict(os.environ, {"MOCK_ZKP_VERIFICATION": "false"}), patch(
+            "api.main.resolve_verification_key_path", return_value="/chemin/inexistant/vk.json"
+        ), patch(
+            "api.main.verifier_sante_noeuds",
+            return_value={"noeuds_configures": 3, "noeuds_disponibles": 3, "quorum_atteint": True},
+        ):
+            res = api_main.health_check()
+            self.assertEqual(res.statut, "degrade")
+            self.assertFalse(res.zkp_ok)
 
 
 if __name__ == "__main__":

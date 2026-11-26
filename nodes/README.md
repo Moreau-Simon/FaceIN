@@ -243,3 +243,28 @@ Le certificat public ca.crt peut être versionné dans le dépôt.
 La CA actuelle est destinée aux tests du projet. Sa clé privée ayant été partagée sur Discord, toute personne qui l'a récupérée pourrait signer des certificats reconnus par les composants qui lui font confiance.
 
 Pour un environnement de production, il faudra créer une nouvelle CA dont la clé privée sera conservée dans un emplacement sécurisé et ne sera jamais partagée. Les certificats des composants devront alors être régénérés et signés par cette nouvelle CA.
+
+
+## Séparation Développement / Production & Gestion de la CA
+
+### Profils Docker Compose
+- **Développement** : `docker compose up --build` (utilise `.env` ou les valeurs par défaut locales).
+- **Production** : `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d`
+  - Exige `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` et `JWT_SECRET_KEY`.
+  - Ferme le port PostgreSQL sur l'hôte (`5432` reste uniquement sur le réseau Docker interne).
+  - Désactive tous les modes de simulation (`MOCK_ZKP_VERIFICATION=false`, `ALLOW_MOCK_CONSENSUS=false`) et active `JWT_ENV=production`.
+  - L'API démarre dès que PostgreSQL est prêt ; un nœud temporairement arrêté ne bloque pas le démarrage, mais le quorum `2/3` reste strictement requis pour toute authentification.
+
+### Procédure de remplacement de la CA en production
+La CA présente dans `nodes/infra/tls/ca.crt` est destinée uniquement au développement et aux tests. Sa clé privée ayant pu être partagée dans un contexte de développement, elle **ne doit jamais être utilisée en production**.
+
+Pour déployer une infrastructure réelle :
+1. Générer une nouvelle CA hors du dépôt Git :
+   ```bash
+   openssl genrsa -out /srv/facein-pki/ca.key 4096
+   openssl req -x509 -new -nodes -key /srv/facein-pki/ca.key -sha256 -days 1825 \
+     -subj "/CN=FaceIN Production CA" -out /srv/facein-pki/ca.crt
+   ```
+2. Émettre de nouveaux certificats feuille (`node-a`, `node-b`, `node-c`, `api-gateway`) avec les SAN DNS correspondants et `extendedKeyUsage=serverAuth,clientAuth`, et une durée de vie limitée (90 à 365 jours).
+3. Pointer `TLS_CA_CERT_HOST_PATH` vers `/srv/facein-pki/ca.crt` et monter les nouveaux certificats dans `./certs/` (ignoré par Git).
+4. Pour la rotation : remplacer les certificats avant expiration, puis recharger les conteneurs un par un sans interrompre le quorum (`2/3`).

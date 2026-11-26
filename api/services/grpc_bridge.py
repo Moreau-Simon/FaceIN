@@ -120,6 +120,37 @@ def fermer_canaux() -> None:
         channel.close()
 
 
+def verifier_sante_noeuds(timeout_sec: float = 1.0) -> dict[str, Any]:
+    """Sonde la disponibilité des nœuds gRPC configurés sans bloquer le démarrage.
+
+    Retourne le nombre de nœuds joignables et si le quorum minimal (2/3) est atteint.
+    """
+    nodes = DEFAULT_NODES
+    quorum_requis = min(2, len(nodes)) if nodes else 0
+
+    if grpc is None:
+        return {
+            "noeuds_configures": len(nodes),
+            "noeuds_disponibles": 0,
+            "quorum_atteint": False,
+        }
+
+    disponibles = 0
+    for node in nodes:
+        try:
+            channel = _creer_canal(node["target"])
+            grpc.channel_ready_future(channel).result(timeout=timeout_sec)
+            disponibles += 1
+        except Exception:
+            continue
+
+    return {
+        "noeuds_configures": len(nodes),
+        "noeuds_disponibles": disponibles,
+        "quorum_atteint": disponibles >= quorum_requis and quorum_requis > 0,
+    }
+
+
 def _verifier_noeud_unitaire(
     node: dict[str, Any],
     user_id: str,

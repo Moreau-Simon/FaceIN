@@ -111,12 +111,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      node-a:
-        condition: service_healthy
-      node-b:
-        condition: service_healthy
-      node-c:
-        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
     environment:
       - STORE_BACKEND=postgres
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-facein-dev-jwt-secret-key-not-for-prod}

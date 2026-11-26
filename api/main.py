@@ -26,15 +26,17 @@ try:
     from routes.authenticate import router as authenticate_router  # noqa: E402
     from routes.nonce import router as nonce_router  # noqa: E402
     from routes.register import router as register_router  # noqa: E402
-    from services.grpc_bridge import DEFAULT_NODES, fermer_canaux  # noqa: E402
+    from services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from services.store import close_store, get_store  # noqa: E402
+    from services.zkp_verifier import resolve_verification_key_path  # noqa: E402
 except ImportError:
     from api.models import HealthResponse  # noqa: E402
     from api.routes.authenticate import router as authenticate_router  # noqa: E402
     from api.routes.nonce import router as nonce_router  # noqa: E402
     from api.routes.register import router as register_router  # noqa: E402
-    from api.services.grpc_bridge import DEFAULT_NODES, fermer_canaux  # noqa: E402
+    from api.services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from api.services.store import close_store, get_store  # noqa: E402
+    from api.services.zkp_verifier import resolve_verification_key_path  # noqa: E402
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -180,23 +182,51 @@ app.include_router(authenticate_router, prefix="/api", tags=["Authentification"]
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Statut"])
 def health_check():
-    """Endpoint de contrôle de l'état de santé du service et de ses dépendances."""
+    """Endpoint de contrôle complet : processus, stockage, ZKP, nœuds et quorum."""
     backend_stockage = os.getenv("STORE_BACKEND", "memory").lower()
     store_ok = True
     try:
         st = get_store()
         if hasattr(st, "ping"):
-            store_ok = st.ping()
+            store_ok = bool(st.ping())
     except Exception:
         store_ok = False
 
-    statut = "en_ligne" if store_ok else "degrade"
+    mock_zkp = os.getenv("MOCK_ZKP_VERIFICATION", "false").strip().lower() in {
+        "1", "true", "yes"
+    }
+    zkp_ok = mock_zkp or os.path.isfile(resolve_verification_key_path())
+
+    try:
+        sante_noeuds = verifier_sante_noeuds(timeout_sec=0.5)
+    except Exception:
+        sante_noeuds = {
+            "noeuds_configures": len(DEFAULT_NODES),
+            "noeuds_disponibles": 0,
+            "quorum_atteint": False,
+        }
+
+    noeuds_dispos = int(sante_noeuds.get("noeuds_disponibles", 0))
+    quorum_ok = bool(sante_noeuds.get("quorum_atteint", False))
+
+    if not store_ok:
+        statut = "degrade"
+    elif not zkp_ok or not quorum_ok:
+        statut = "degrade"
+    else:
+        statut = "en_ligne"
+
     return HealthResponse(
         statut=statut,
         service="FaceIn API Gateway",
         version="1.0.0",
+        processus="ok",
         stockage=backend_stockage,
+        stockage_ok=store_ok,
+        zkp_ok=zkp_ok,
         noeuds_configures=len(DEFAULT_NODES),
+        noeuds_disponibles=noeuds_dispos,
+        quorum_atteint=quorum_ok,
     )
 
 

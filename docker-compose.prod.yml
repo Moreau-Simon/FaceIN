@@ -1,0 +1,62 @@
+# Surcharge Docker Compose pour l'environnement de PRODUCTION.
+# Usage : docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Exigences :
+# - Toutes les variables sensibles (POSTGRES_PASSWORD, JWT_SECRET_KEY) sont OBLIGATOIRES.
+# - Le port PostgreSQL n'est pas exposé sur l'hôte.
+# - Aucun mode mock ZKP ou consensus n'est autorisé.
+# - La CA et les certificats doivent être régénérés hors dépôt Git (voir nodes/README.md).
+
+services:
+  db:
+    ports: !reset []
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB requis en production}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER requis en production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis en production}
+    security_opt:
+      - no-new-privileges:true
+
+  node-a:
+    restart: unless-stopped
+    environment:
+      - MOCK_ZKP_VERIFICATION=false
+      - TLS_ENABLED=true
+    security_opt:
+      - no-new-privileges:true
+
+  node-b:
+    restart: unless-stopped
+    environment:
+      - MOCK_ZKP_VERIFICATION=false
+      - TLS_ENABLED=true
+    security_opt:
+      - no-new-privileges:true
+
+  node-c:
+    restart: unless-stopped
+    environment:
+      - MOCK_ZKP_VERIFICATION=false
+      - TLS_ENABLED=true
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    restart: unless-stopped
+    environment:
+      - STORE_BACKEND=postgres
+      - JWT_ENV=production
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY requis en production}
+      - JWT_SECRET_KEY_PREVIOUS=${JWT_SECRET_KEY_PREVIOUS:-}
+      - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-3600}
+      - MOCK_ZKP_VERIFICATION=false
+      - ALLOW_MOCK_CONSENSUS=false
+      - TLS_ENABLED=true
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER requis}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis}@db:5432/${POSTGRES_DB:?POSTGRES_DB requis}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:?POSTGRES_DB requis}
+      - DB_USER=${POSTGRES_USER:?POSTGRES_USER requis}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis}
+    security_opt:
+      - no-new-privileges:true
