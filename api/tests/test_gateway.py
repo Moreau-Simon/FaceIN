@@ -270,6 +270,28 @@ class TestGrpcBridge(unittest.TestCase):
         self.assertIsNone(nonce)
         self.assertIsNone(exp)
 
+    def test_verifier_sante_noeuds_sonde_chaque_noeud_par_host_port(self):
+        """Régression : la sonde lisait une clé 'target' absente de DEFAULT_NODES,
+        l'exception était avalée et le health check annonçait toujours 0 nœud."""
+        cibles = []
+        futur = Mock()
+        futur.result.return_value = None
+        faux_grpc = Mock()
+        faux_grpc.channel_ready_future.return_value = futur
+
+        def canal(cible):
+            cibles.append(cible)
+            return Mock()
+
+        with patch.object(grpc_bridge, "grpc", faux_grpc), patch.object(
+            grpc_bridge, "_creer_canal", side_effect=canal
+        ):
+            res = grpc_bridge.verifier_sante_noeuds(timeout_sec=0.1)
+
+        self.assertEqual(res["noeuds_disponibles"], len(grpc_bridge.DEFAULT_NODES))
+        self.assertTrue(res["quorum_atteint"])
+        self.assertEqual(cibles, [f"{n['host']}:{n['port']}" for n in grpc_bridge.DEFAULT_NODES])
+
     def test_api_lifespan_ferme_les_canaux_partages(self):
         """Vérifie que les canaux gRPC partagés sont fermés en fin de cycle de vie."""
         channel = Mock()

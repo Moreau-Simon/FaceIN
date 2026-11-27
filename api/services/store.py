@@ -613,7 +613,6 @@ def close_store() -> None:
 
 def reset_store() -> None:
     """Réinitialise les données du store et libère l'instance."""
-    global _current_store
     backend = os.getenv("STORE_BACKEND", "memory").lower()
     if backend == "memory":
         if isinstance(_current_store, MemoryStore):

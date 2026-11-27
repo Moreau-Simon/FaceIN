@@ -138,7 +138,7 @@ def verifier_sante_noeuds(timeout_sec: float = 1.0) -> dict[str, Any]:
     disponibles = 0
     for node in nodes:
         try:
-            channel = _creer_canal(node["target"])
+            channel = _creer_canal(f"{node['host']}:{node['port']}")
             grpc.channel_ready_future(channel).result(timeout=timeout_sec)
             disponibles += 1
         except Exception:
