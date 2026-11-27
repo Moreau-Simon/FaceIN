@@ -22,7 +22,7 @@ name: FaceIN CI
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "gestion_backend" ]
     paths-ignore:
       - "**.md"
       - ".gitignore"
@@ -146,13 +146,15 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Les tests de sécurité/concurrence de l'API importent aussi des modules
+      # des nœuds (consensus, Merkle, engagements) : dépendances des deux côtés.
       - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install -r api/requirements.txt pytest
+          pip install -r api/requirements.txt -r nodes/node/requirements.txt pytest
 
-      # Même génération que le Dockerfile de l'API : grpc_bridge importe
-      # verification_pb2 / verification_pb2_grpc
+      # Même génération que les Dockerfiles : grpc_bridge importe
+      # verification_pb2 ; les modules des nœuds importent tous les .proto
       - name: Générer le code protobuf
         run: |
           python -m grpc_tools.protoc \
@@ -160,9 +162,117 @@ jobs:
             --python_out=api \
             --grpc_python_out=api \
             nodes/shared/proto/verification.proto
+          python -m grpc_tools.protoc \
+            -I nodes/shared/proto \
+            --python_out=nodes/node \
+            --grpc_python_out=nodes/node \
+            nodes/shared/proto/*.proto
 
+      # Aucune simulation positive : MOCK_ZKP_VERIFICATION forcé à false.
+      # Les preuves Groth16 réelles sont testées dans le job tests-zkp-reel.
       - name: Lancer les tests
-        run: python -m pytest api/tests -v
+        env:
+          MOCK_ZKP_VERIFICATION: "false"
+        run: python -m pytest api/tests -v --ignore=api/tests/test_zkp_crypto.py
+
+  # ---------------------------------------------------------------------------
+  # Preuves Groth16 réelles : cérémonie de TEST jetable (clés du dépôt intactes)
+  # ---------------------------------------------------------------------------
+  tests-zkp-reel:
+    name: Tests cryptographiques Groth16 réels
+    if: needs.detect.outputs.api == 'true' && needs.detect.outputs.circuits == 'true'
+    needs: detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: circuits/package-lock.json
+
+      - name: Installer circom
+        run: |
+          curl -fsSL -o /usr/local/bin/circom \
+            https://github.com/iden3/circom/releases/download/v2.1.9/circom-linux-amd64
+          chmod +x /usr/local/bin/circom
+          circom --version
+
+      - name: Installer les dépendances
+        run: |
+          (cd circuits && npm ci)
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt -r nodes/node/requirements.txt pytest
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=nodes/node --grpc_python_out=nodes/node nodes/shared/proto/*.proto
+
+      - name: Générer les artefacts Groth16 de test
+        run: bash scripts/generate_test_zkp_artifacts.sh
+
+      # FACEIN_REQUIRE_REAL_ZKP=1 : l'absence d'artefacts réels fait échouer le job
+      - name: Lancer les tests cryptographiques
+        env:
+          FACEIN_REQUIRE_REAL_ZKP: "1"
+          MOCK_ZKP_VERIFICATION: "false"
+        run: |
+          export PATH="$GITHUB_WORKSPACE/circuits/node_modules/.bin:$PATH"
+          python -m pytest api/tests/test_zkp_crypto.py -v
+
+  # ---------------------------------------------------------------------------
+  # Tests d'intégration PostgreSQL isolés (conteneur éphémère de test)
+  # ---------------------------------------------------------------------------
+  tests-postgres:
+    name: Tests intégration PostgreSQL
+    if: needs.detect.outputs.api == 'true'
+    needs: detect
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: facein_test
+          POSTGRES_USER: facein_test
+          POSTGRES_PASSWORD: facein_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt pytest
+
+      - name: Initialiser le schéma de test
+        env:
+          PGPASSWORD: facein_test_password
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -h 127.0.0.1 -U facein_test -d facein_test -f 01_schema.sql
+
+      - name: Exécuter les tests d'intégration PostgreSQL
+        env:
+          STORE_BACKEND: postgres
+          TEST_POSTGRES_URL: postgresql://facein_test:facein_test_password@127.0.0.1:5432/facein_test
+        run: python -m pytest api/tests/test_store_postgres.py -v
 
   # ---------------------------------------------------------------------------
   # Circuit ZKP — uniquement si circuits/ est présent

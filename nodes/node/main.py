@@ -18,7 +18,12 @@ import grpc
 from store.engagements import EngagementsStore
 
 from config import ErreurConfiguration, charger_configuration
-from consensus.validation import VoteExecutor, decider, VerificateurZKP
+from consensus.validation import (
+    VoteExecutor,
+    decider,
+    VerificateurZKP,
+    verifier_absence_mock_en_production,
+)
 from merkle.sync import synchroniser_tous_les_pairs
 from network.peer_client import demander_vote, envoyer_heartbeat, fermer_canaux
 from network.peers import PeerRegistry, formater_adresse_pair
@@ -108,6 +113,12 @@ def main():
     Les battements de cœur sont envoyés en parallèle aux pairs. Une erreur de
     communication avec un pair n'empêche pas le traitement des autres.
     """
+
+    try:
+        verifier_absence_mock_en_production()
+    except RuntimeError as exc:
+        logger.error("Démarrage refusé : %s", exc)
+        raise SystemExit(1) from exc
 
     try:
         config = charger_configuration()

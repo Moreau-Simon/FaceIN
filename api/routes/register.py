@@ -12,12 +12,12 @@ try:
     from models import RegisterRequest, RegisterResponse
     from services.grpc_bridge import propagate_commitment_to_nodes
     from services.rate_limiter import enforce_rate_limit
-    from services.store import save_commitment, user_exists
+    from services.store import register_new_commitment, user_exists
 except ImportError:
     from api.models import RegisterRequest, RegisterResponse
     from api.services.grpc_bridge import propagate_commitment_to_nodes
     from api.services.rate_limiter import enforce_rate_limit
-    from api.services.store import save_commitment, user_exists
+    from api.services.store import register_new_commitment, user_exists
 
 logger = logging.getLogger("facein.routes.register")
 
@@ -38,21 +38,29 @@ def register(payload: RegisterRequest, request: Request = None) -> RegisterRespo
     user_id = payload.user_id.strip()
     commitment = payload.commitment.strip()
 
+    conflit = HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"L'utilisateur '{user_id}' est déjà enregistré.",
+    )
+
+    # Pré-contrôle rapide (non suffisant seul face aux requêtes concurrentes)
     if user_exists(user_id):
         logger.warning("Tentative d'enregistrement d'un utilisateur déjà existant : '%s'", user_id)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"L'utilisateur '{user_id}' est déjà enregistré.",
-        )
+        raise conflit
 
     try:
-        save_commitment(user_id, commitment)
+        # Création atomique : une seule inscription concurrente du même identifiant réussit
+        cree = register_new_commitment(user_id, commitment)
     except Exception as exc:
         logger.error("Erreur lors de la sauvegarde de l'engagement pour '%s' : %s", user_id, type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erreur interne lors de l'enregistrement.",
         )
+
+    if not cree:
+        logger.warning("Inscription concurrente refusée, identifiant déjà créé : '%s'", user_id)
+        raise conflit
 
     # Propagation explicite et sécurisée vers le réseau de nœuds de vérification
     try:

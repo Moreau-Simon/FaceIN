@@ -26,10 +26,36 @@ DEFAULT_SEUIL_MAX = int(os.getenv("DISTANCE_THRESHOLD", "16000000"))
 MAX_PROOF_PAYLOAD_BYTES = 64 * 1024  # 64 Ko max pour prévenir les attaques DoS
 SNARKJS_TIMEOUT_SECONDS = 10
 
+# Environnements dans lesquels toute simulation est interdite (FACEIN_ENV)
+PRODUCTION_ENV_VALUES = {"production", "prod"}
+
 API_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_VK_PATH = os.path.normpath(
     os.path.join(API_DIR, "..", "circuits", "build", "verification_key.json")
 )
+
+
+def est_environnement_production() -> bool:
+    """Indique si l'API s'exécute en production (FACEIN_ENV=production)."""
+    return os.getenv("FACEIN_ENV", "").strip().lower() in PRODUCTION_ENV_VALUES
+
+
+def mock_zkp_demande() -> bool:
+    """Indique si la simulation ZKP est demandée via MOCK_ZKP_VERIFICATION."""
+    return os.getenv("MOCK_ZKP_VERIFICATION", "").strip().lower() in ("true", "1", "yes")
+
+
+def verifier_absence_mock_en_production() -> None:
+    """
+    Refuse le démarrage si un mode de simulation est actif en production.
+
+    Lève RuntimeError lorsque FACEIN_ENV=production et MOCK_ZKP_VERIFICATION est actif.
+    """
+    if est_environnement_production() and mock_zkp_demande():
+        raise RuntimeError(
+            "MOCK_ZKP_VERIFICATION est interdit lorsque FACEIN_ENV=production. "
+            "Désactivez la simulation ZKP avant de démarrer l'API."
+        )
 
 
 def decompose_nonce_to_signals(nonce_hex: str) -> Tuple[str, str]:
@@ -230,8 +256,15 @@ def verify_proof(
         logger.warning("Signaux publics ZKP invalides : %s", err_sig)
         return False
 
-    # Mode simulation (pour environnements de test / CI sans Node.js ou snarkjs)
-    if os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in ("true", "1", "yes"):
+    # Mode simulation (pour environnements de test / CI sans Node.js ou snarkjs).
+    # Interdit en production : la preuve est alors refusée, jamais acceptée.
+    if mock_zkp_demande():
+        if est_environnement_production():
+            logger.error(
+                "MOCK_ZKP_VERIFICATION ignoré : simulation interdite en production. "
+                "Preuve refusée."
+            )
+            return False
         logger.warning(
             "Vérification ZKP en mode simulation (MOCK_ZKP_VERIFICATION=true). "
             "Preuve acceptée après validation syntaxique."

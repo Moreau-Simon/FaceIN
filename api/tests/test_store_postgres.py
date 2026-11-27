@@ -10,8 +10,10 @@ Couvre les exigences du stockage persistant :
 - Fermeture propre des connexions (close)
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import os
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import MagicMock, Mock, patch
@@ -218,6 +220,130 @@ class TestStorePostgresUnit(unittest.TestCase):
             inst.clear()
             mock_cursor.execute.assert_called_once()
             self.assertIn("TRUNCATE TABLE", mock_cursor.execute.call_args.args[0])
+
+
+@unittest.skipUnless(
+    os.getenv("TEST_POSTGRES_URL"),
+    "TEST_POSTGRES_URL non définie (tests d'intégration PostgreSQL isolés ignorés en local)",
+)
+class TestStorePostgresIntegration(unittest.TestCase):
+    """Tests d'intégration sur une base PostgreSQL de test isolée."""
+
+    def setUp(self):
+        self.db_url = os.environ["TEST_POSTGRES_URL"]
+        self.pg = store.PostgresStore(database_url=self.db_url)
+        with patch.dict(os.environ, {"ALLOW_DESTRUCTIVE_STORE_RESET": "true"}):
+            self.pg.clear()
+
+    def tearDown(self):
+        with patch.dict(os.environ, {"ALLOW_DESTRUCTIVE_STORE_RESET": "true"}):
+            self.pg.clear()
+        self.pg.close()
+
+    def test_postgres_roundtrip_engagement_nonce_revocation_jwt(self):
+        self.assertTrue(self.pg.ping())
+        self.pg.save_engagement("pg_alice", "123456789")
+        self.assertEqual(self.pg.get_engagement("pg_alice")["commitment"], "123456789")
+
+        # Nonce atomique à usage unique
+        self.pg.save_nonce("pg_nonce_1", "pg_alice", time.time() + 60.0)
+        self.assertTrue(self.pg.consume_nonce("pg_nonce_1", "pg_alice"))
+        self.assertFalse(self.pg.consume_nonce("pg_nonce_1", "pg_alice"))
+
+        # Révocation JTI et autorisation par service
+        self.pg.save_revoked_jti("pg-jti-1", time.time() + 120.0)
+        self.assertTrue(self.pg.is_jti_revoked("pg-jti-1"))
+
+        self.pg.set_service_authorization("pg_alice", "facein-web", "revoque")
+        self.assertFalse(self.pg.is_service_authorized("pg_alice", "facein-web"))
+
+    def test_postgres_creation_utilisateur_en_double_refusee(self):
+        self.assertTrue(self.pg.create_user_with_engagement("pg_bob", "111"))
+        self.assertFalse(self.pg.create_user_with_engagement("pg_bob", "222"))
+        # L'engagement initial n'est pas écrasé par la tentative en double
+        self.assertEqual(self.pg.get_engagement("pg_bob")["commitment"], "111")
+
+    def test_postgres_inscriptions_concurrentes_meme_utilisateur(self):
+        nb = 10
+        barriere = threading.Barrier(nb)
+
+        def inscrire(idx):
+            barriere.wait(timeout=10)
+            return self.pg.create_user_with_engagement("pg_race", str(9000 + idx))
+
+        with ThreadPoolExecutor(max_workers=nb) as pool:
+            resultats = list(pool.map(inscrire, range(nb)))
+
+        self.assertEqual(resultats.count(True), 1)
+        gagnant = str(9000 + resultats.index(True))
+        self.assertEqual(self.pg.get_engagement("pg_race")["commitment"], gagnant)
+        with self.pg.get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM engagements_cryptographiques ec
+                JOIN utilisateurs u ON u.id = ec.utilisateur_id WHERE u.nom = %s;
+                """,
+                ("pg_race",),
+            )
+            self.assertEqual(cur.fetchone()[0], 1)
+
+    def test_postgres_mise_a_jour_engagement_un_seul_actif(self):
+        self.pg.save_engagement("pg_carol", "1")
+        self.pg.save_engagement("pg_carol", "2")
+        self.assertEqual(self.pg.get_engagement("pg_carol")["commitment"], "2")
+        with self.pg.get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT ec.statut, count(*) FROM engagements_cryptographiques ec
+                JOIN utilisateurs u ON u.id = ec.utilisateur_id
+                WHERE u.nom = %s GROUP BY ec.statut;
+                """,
+                ("pg_carol",),
+            )
+            statuts = dict(cur.fetchall())
+        self.assertEqual(statuts, {"actif": 1, "revoque": 1})
+
+    def test_postgres_consommations_simultanees_nonce_une_seule_reussit(self):
+        self.pg.save_engagement("pg_dave", "42")
+        self.pg.save_nonce("pg_nonce_conc", "pg_dave", time.time() + 60.0)
+        nb = 16
+        barriere = threading.Barrier(nb)
+
+        def consommer(_):
+            barriere.wait(timeout=10)
+            return self.pg.consume_nonce("pg_nonce_conc", "pg_dave")
+
+        with ThreadPoolExecutor(max_workers=nb) as pool:
+            resultats = list(pool.map(consommer, range(nb)))
+        self.assertEqual(resultats.count(True), 1)
+
+    def test_postgres_nonce_mauvais_utilisateur_non_consomme(self):
+        self.pg.save_engagement("pg_erin", "42")
+        self.pg.save_nonce("pg_nonce_owner", "pg_erin", time.time() + 60.0)
+        self.assertFalse(self.pg.consume_nonce("pg_nonce_owner", "pg_mallory"))
+        # Le nonce du vrai propriétaire reste utilisable une seule fois
+        self.assertTrue(self.pg.consume_nonce("pg_nonce_owner", "pg_erin"))
+        self.assertFalse(self.pg.consume_nonce("pg_nonce_owner", "pg_erin"))
+
+    def test_postgres_nonce_expire_refuse(self):
+        self.pg.save_engagement("pg_frank", "42")
+        self.pg.save_nonce("pg_nonce_exp", "pg_frank", time.time() - 1.0)
+        self.assertFalse(self.pg.consume_nonce("pg_nonce_exp", "pg_frank"))
+
+    def test_postgres_persistance_apres_redemarrage_du_pool(self):
+        self.pg.save_engagement("pg_gina", "777")
+        self.pg.save_revoked_jti("pg-jti-persist", time.time() + 120.0)
+        self.pg.close()
+        # Pool fermé : la disponibilité est signalée négative, jamais simulée
+        self.assertFalse(self.pg.ping())
+        with self.assertRaises(RuntimeError):
+            self.pg.get_engagement("pg_gina")
+
+        # Nouvelle instance = redémarrage de l'API
+        self.pg = store.PostgresStore(database_url=self.db_url)
+        self.assertTrue(self.pg.ping())
+        self.assertEqual(self.pg.get_engagement("pg_gina")["commitment"], "777")
+        self.assertTrue(self.pg.is_jti_revoked("pg-jti-persist"))
 
 
 if __name__ == "__main__":

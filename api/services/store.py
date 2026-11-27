@@ -9,6 +9,7 @@ Supporte deux backends configurables via la variable STORE_BACKEND :
 from contextlib import contextmanager
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Generator, Optional
 
@@ -34,6 +35,8 @@ class MemoryStore:
         self.users: set = set()
         self.revoked_jtis: Dict[str, float] = {}
         self.service_authorizations: Dict[tuple, str] = {}
+        # Verrou garantissant l'atomicité de la création d'un nouvel utilisateur
+        self._lock = threading.Lock()
 
     def ping(self) -> bool:
         return True
@@ -59,6 +62,18 @@ class MemoryStore:
             "commitment": commitment,
             "statut": "actif",
         }
+
+    def create_user_with_engagement(self, user_id: str, commitment: str) -> bool:
+        """
+        Crée atomiquement un nouvel utilisateur et son engagement actif.
+
+        Retourne False (sans rien modifier) si l'identifiant existe déjà.
+        """
+        with self._lock:
+            if self.user_exists(user_id):
+                return False
+            self.save_engagement(user_id, commitment)
+            return True
 
     def get_engagement(self, user_id: str) -> Optional[Dict[str, str]]:
         e = self.engagements.get(user_id)
@@ -241,6 +256,37 @@ class PostgresStore:
                 """,
                 (user_uuid, commitment),
             )
+
+    def create_user_with_engagement(self, user_id: str, commitment: str) -> bool:
+        """
+        Crée atomiquement un nouvel utilisateur et son engagement actif.
+
+        L'INSERT ... ON CONFLICT DO NOTHING s'appuie sur la contrainte UNIQUE de
+        utilisateurs.nom : en cas d'inscriptions concurrentes du même identifiant,
+        une seule transaction crée la ligne, les autres ne modifient rien.
+        Retourne False si l'identifiant existe déjà.
+        """
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO utilisateurs (nom)
+                VALUES (%s)
+                ON CONFLICT (nom) DO NOTHING
+                RETURNING id;
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return False
+            cur.execute(
+                """
+                INSERT INTO engagements_cryptographiques (utilisateur_id, valeur, algorithme, statut)
+                VALUES (%s, %s, 'poseidon', 'actif');
+                """,
+                (row[0], commitment),
+            )
+            return True
 
     def get_engagement(self, user_id: str) -> Optional[Dict[str, str]]:
         with self.get_cursor() as cur:
@@ -494,6 +540,11 @@ def reset_store() -> None:
 # Fonctions de compatibilité pour les routes
 def save_commitment(user_id: str, commitment: str) -> None:
     get_store().save_engagement(user_id, commitment)
+
+
+def register_new_commitment(user_id: str, commitment: str) -> bool:
+    """Inscription atomique : False si l'identifiant est déjà enregistré."""
+    return get_store().create_user_with_engagement(user_id, commitment)
 
 
 def get_commitment(user_id: str) -> Optional[str]:

@@ -8,9 +8,8 @@ import asyncio
 import os
 import sys
 
-# Forcer le backend mémoire et autoriser la simulation par défaut dans les tests unitaires
+# Forcer le backend mémoire dans les tests unitaires (aucune simulation de consensus)
 os.environ.setdefault("STORE_BACKEND", "memory")
-os.environ.setdefault("ALLOW_MOCK_CONSENSUS", "true")
 
 import tempfile
 import time
@@ -245,18 +244,26 @@ class TestGrpcBridge(unittest.TestCase):
     def tearDown(self):
         grpc_bridge.fermer_canaux()
 
-    def test_verify_on_nodes_fallback_mock(self):
-        with patch.dict(os.environ, {"ALLOW_MOCK_CONSENSUS": "true"}):
+    def test_verify_on_nodes_sans_reseau_refuse_sans_votes_fabriques(self):
+        """Sans nœud joignable, le consensus est refusé et aucun vote n'est inventé,
+        même si d'anciennes variables de simulation sont présentes."""
+        with patch.dict(
+            os.environ,
+            {"ALLOW_MOCK_CONSENSUS": "true", "MOCK_ZKP_VERIFICATION": "true"},
+        ), patch.object(grpc_bridge, "grpc", None):
             result = grpc_bridge.verify_on_nodes(
                 user_id="alice",
                 proof_json_str=json.dumps({"test": True}),
                 nonce="0123456789abcdef0123456789abcdef",
             )
-            self.assertIn("consensus", result)
-            self.assertIn("votes", result)
-            self.assertIn("majority", result)
-            self.assertIsInstance(result["consensus"], bool)
-            self.assertEqual(len(result["votes"]), 3)
+        self.assertFalse(result["consensus"])
+        self.assertEqual(result["votes"], {})
+        self.assertEqual(result["nb_votes_pour"], 0)
+        self.assertIsNone(result["token"])
+        self.assertEqual(
+            sorted(result["noeuds_indisponibles"]),
+            sorted(n["id"] for n in grpc_bridge.DEFAULT_NODES),
+        )
 
     def test_request_nonce_from_node_fallback(self):
         nonce, exp = grpc_bridge.request_nonce_from_node(user_id="alice")
@@ -825,7 +832,7 @@ class TestRegisterAndNonceRoutes(unittest.TestCase):
     def test_register_store_dependency_error(self):
         from routes.register import register
 
-        with patch("routes.register.save_commitment", side_effect=RuntimeError("DB disconnected")):
+        with patch("routes.register.register_new_commitment", side_effect=RuntimeError("DB disconnected")):
             req = RegisterRequest(user_id="alice_err", commitment="12345")
             with self.assertRaises(HTTPException) as ctx:
                 register(req)

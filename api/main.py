@@ -28,7 +28,12 @@ try:
     from routes.register import router as register_router  # noqa: E402
     from services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from services.store import close_store, get_store  # noqa: E402
-    from services.zkp_verifier import resolve_verification_key_path  # noqa: E402
+    from services.zkp_verifier import (  # noqa: E402
+        est_environnement_production,
+        mock_zkp_demande,
+        resolve_verification_key_path,
+        verifier_absence_mock_en_production,
+    )
 except ImportError:
     from api.models import HealthResponse  # noqa: E402
     from api.routes.authenticate import router as authenticate_router  # noqa: E402
@@ -36,7 +41,12 @@ except ImportError:
     from api.routes.register import router as register_router  # noqa: E402
     from api.services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from api.services.store import close_store, get_store  # noqa: E402
-    from api.services.zkp_verifier import resolve_verification_key_path  # noqa: E402
+    from api.services.zkp_verifier import (  # noqa: E402
+        est_environnement_production,
+        mock_zkp_demande,
+        resolve_verification_key_path,
+        verifier_absence_mock_en_production,
+    )
 
 # Configuration du format des logs
 logging.basicConfig(
@@ -65,6 +75,8 @@ async def lifespan(app: FastAPI):
     """Gère le cycle de vie de l'API : contrôle du store au démarrage et fermeture propre."""
     logger.info("%s", BANNER)
     logger.info("Démarrage de la passerelle API FaceIn...")
+    # Refus de démarrage si une simulation est active en production (aucune exception silencieuse)
+    verifier_absence_mock_en_production()
     try:
         st = get_store()
         if hasattr(st, "ping") and not st.ping():
@@ -192,9 +204,8 @@ def health_check():
     except Exception:
         store_ok = False
 
-    mock_zkp = os.getenv("MOCK_ZKP_VERIFICATION", "false").strip().lower() in {
-        "1", "true", "yes"
-    }
+    # La simulation ZKP n'est jamais considérée comme disponible en production
+    mock_zkp = mock_zkp_demande() and not est_environnement_production()
     zkp_ok = mock_zkp or os.path.isfile(resolve_verification_key_path())
 
     try:

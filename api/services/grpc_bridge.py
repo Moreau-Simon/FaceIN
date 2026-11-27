@@ -170,30 +170,6 @@ def _verifier_noeud_unitaire(
     target = f"{host}:{port}"
 
     if grpc is None or verification_pb2 is None or verification_pb2_grpc is None:
-        if (
-            os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in {"1", "true"}
-            or os.getenv("ALLOW_MOCK_CONSENSUS", "").lower() in {"1", "true"}
-        ):
-            logger.warning(
-                "[%s] Protobuf/gRPC non disponible - simulation de test active.",
-                node_id,
-            )
-            return {
-                "node_id": node_id,
-                "accepte": True,
-                "token": "token-simule",
-                "raison_refus": "",
-                "coordinateur_id": node_id,
-                "votes": {n["id"]: True for n in DEFAULT_NODES},
-                "votes_recus": [
-                    {"noeud_id": n["id"], "vote_pour": True, "raison": ""}
-                    for n in DEFAULT_NODES
-                ],
-                "nb_votes_pour": len(DEFAULT_NODES),
-                "nb_votes_contre": 0,
-                "noeuds_indisponibles": [],
-                "seuil_requis": (len(DEFAULT_NODES) // 2) + 1,
-            }
         logger.error("[%s] Protobuf/gRPC non compilé ou indisponible.", node_id)
         return None
 
@@ -374,27 +350,6 @@ def verify_on_nodes(
 
     # Cas où tous les noeuds gRPC sont injoignables
     logger.warning("Tous les noeuds du réseau de consensus sont injoignables.")
-
-    if (
-        os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in {"1", "true"}
-        or os.getenv("ALLOW_MOCK_CONSENSUS", "").lower() in {"1", "true"}
-    ):
-        logger.warning(
-            "Mode test local : simulation d'un consensus favorable."
-        )
-        votes = {n["id"]: True for n in target_nodes}
-        return {
-            "consensus": True,
-            "votes": votes,
-            "majority": f"{total_nodes}/{total_nodes}",
-            "initiator": target_nodes[0]["id"] if target_nodes else "none",
-            "token": "token-simule-fallback",
-            "reason": "",
-            "nb_votes_pour": total_nodes,
-            "nb_votes_contre": 0,
-            "noeuds_indisponibles": [],
-            "seuil_requis": seuil_defaut,
-        }
 
     return {
         "consensus": False,

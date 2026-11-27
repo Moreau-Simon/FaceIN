@@ -231,6 +231,16 @@ circuits/*.zkey
 circuits/test/witness.wtns
 circuits/test/proof.json
 circuits/test/public.json
+circuits/test/witness_imposteur.wtns
+circuits/test/input.json
+circuits/test/input_impostor.json
+circuits/test/vecteurs.json
+
+# Code Python généré depuis les fichiers .proto (scripts/run_backend_tests.py, CI, Docker)
+api/*_pb2.py
+api/*_pb2_grpc.py
+nodes/node/*_pb2.py
+nodes/node/*_pb2_grpc.py
 
 # Bases SQLite locales
 *.db

@@ -40,6 +40,33 @@ BN254_PRIME = 218882428718392752222464057452572750885483644004160343436982041865
 EXPECTED_PUBLIC_SIGNALS_COUNT = 4
 DEFAULT_SEUIL_MAX = int(os.getenv("DISTANCE_THRESHOLD", "16000000"))
 
+# Environnements dans lesquels toute simulation est interdite (FACEIN_ENV),
+# règle identique à celle de l'API Gateway (api/services/zkp_verifier.py).
+PRODUCTION_ENV_VALUES = {"production", "prod"}
+
+
+def est_environnement_production() -> bool:
+    """Indique si le nœud s'exécute en production (FACEIN_ENV=production)."""
+    return os.getenv("FACEIN_ENV", "").strip().lower() in PRODUCTION_ENV_VALUES
+
+
+def mock_zkp_demande() -> bool:
+    """Indique si la simulation ZKP est demandée via MOCK_ZKP_VERIFICATION."""
+    return os.getenv("MOCK_ZKP_VERIFICATION", "").strip().lower() in ("true", "1", "yes")
+
+
+def verifier_absence_mock_en_production() -> None:
+    """
+    Refuse le démarrage du nœud si une simulation est active en production.
+
+    Lève RuntimeError lorsque FACEIN_ENV=production et MOCK_ZKP_VERIFICATION est actif.
+    """
+    if est_environnement_production() and mock_zkp_demande():
+        raise RuntimeError(
+            "MOCK_ZKP_VERIFICATION est interdit lorsque FACEIN_ENV=production. "
+            "Désactivez la simulation ZKP avant de démarrer le nœud."
+        )
+
 
 @dataclass
 class DetailVote:
@@ -250,7 +277,13 @@ def verifier_preuve(
         )
         return False
 
-    if os.getenv("MOCK_ZKP_VERIFICATION", "").lower() in ("true", "1", "yes"):
+    if mock_zkp_demande():
+        if est_environnement_production():
+            logger.error(
+                "MOCK_ZKP_VERIFICATION ignoré : simulation interdite en production. "
+                "Preuve refusée."
+            )
+            return False
         logger.warning("Vérification ZKP en mode simulation (MOCK_ZKP_VERIFICATION=true).")
         return True
 
