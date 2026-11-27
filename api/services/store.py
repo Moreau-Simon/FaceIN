@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Generator, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 try:
     import psycopg2
@@ -35,6 +35,7 @@ class MemoryStore:
         self.users: set = set()
         self.revoked_jtis: Dict[str, float] = {}
         self.service_authorizations: Dict[tuple, str] = {}
+        self.webauthn_credentials: Dict[str, Dict[str, Any]] = {}
         # Verrou garantissant l'atomicité de la création d'un nouvel utilisateur
         self._lock = threading.Lock()
 
@@ -50,6 +51,7 @@ class MemoryStore:
         self.users.clear()
         self.revoked_jtis.clear()
         self.service_authorizations.clear()
+        self.webauthn_credentials.clear()
 
     def user_exists(self, user_id: str) -> bool:
         return user_id in self.users or user_id in self.engagements
@@ -146,6 +148,45 @@ class MemoryStore:
         if strict:
             return statut == "actif"
         return True
+
+    # --- Passkeys WebAuthn ---
+    def add_webauthn_credential(
+        self,
+        user_id: str,
+        credential_id: str,
+        public_key: bytes,
+        sign_count: int,
+        transports: Optional[List[str]] = None,
+    ) -> bool:
+        """Enregistre une passkey ; False si l'identifiant existe déjà ou l'utilisateur est inconnu."""
+        with self._lock:
+            if not self.user_exists(user_id) or credential_id in self.webauthn_credentials:
+                return False
+            self.webauthn_credentials[credential_id] = {
+                "user_id": user_id,
+                "credential_id": credential_id,
+                "public_key": bytes(public_key),
+                "sign_count": int(sign_count),
+                "transports": list(transports or []),
+                "statut": "actif",
+            }
+            return True
+
+    def get_webauthn_credentials(self, user_id: str) -> List[Dict[str, Any]]:
+        return [
+            dict(c)
+            for c in self.webauthn_credentials.values()
+            if c["user_id"] == user_id and c["statut"] == "actif"
+        ]
+
+    def update_webauthn_sign_count(self, credential_id: str, ancien: int, nouveau: int) -> bool:
+        """Mise à jour conditionnelle : échoue si le compteur a changé entre-temps."""
+        with self._lock:
+            c = self.webauthn_credentials.get(credential_id)
+            if not c or c["statut"] != "actif" or c["sign_count"] != int(ancien):
+                return False
+            c["sign_count"] = int(nouveau)
+            return True
 
 
 # =====================================================================
@@ -471,6 +512,72 @@ class PostgresStore:
                 return bool(row and row[0] == "actif")
             return True
 
+    # --- Passkeys WebAuthn ---
+    def add_webauthn_credential(
+        self,
+        user_id: str,
+        credential_id: str,
+        public_key: bytes,
+        sign_count: int,
+        transports: Optional[List[str]] = None,
+    ) -> bool:
+        """Enregistre une passkey ; False si l'identifiant existe déjà ou l'utilisateur est inconnu."""
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO cles_webauthn
+                    (utilisateur_id, credential_id, cle_publique, compteur, transports)
+                SELECT u.id, %s, %s, %s, %s
+                FROM utilisateurs u WHERE u.nom = %s
+                ON CONFLICT (credential_id) DO NOTHING
+                RETURNING id;
+                """,
+                (
+                    credential_id,
+                    psycopg2.Binary(bytes(public_key)),
+                    int(sign_count),
+                    ",".join(transports or []),
+                    user_id,
+                ),
+            )
+            return cur.fetchone() is not None
+
+    def get_webauthn_credentials(self, user_id: str) -> List[Dict[str, Any]]:
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT k.credential_id, k.cle_publique, k.compteur, k.transports
+                FROM cles_webauthn k
+                JOIN utilisateurs u ON u.id = k.utilisateur_id
+                WHERE u.nom = %s AND k.statut = 'actif';
+                """,
+                (user_id,),
+            )
+            return [
+                {
+                    "user_id": user_id,
+                    "credential_id": row[0],
+                    "public_key": bytes(row[1]),
+                    "sign_count": int(row[2]),
+                    "transports": [t for t in (row[3] or "").split(",") if t],
+                }
+                for row in cur.fetchall()
+            ]
+
+    def update_webauthn_sign_count(self, credential_id: str, ancien: int, nouveau: int) -> bool:
+        """Mise à jour atomique conditionnelle du compteur (détection d'usage concurrent)."""
+        with self.get_cursor() as cur:
+            cur.execute(
+                """
+                UPDATE cles_webauthn
+                SET compteur = %s, derniere_utilisation = now()
+                WHERE credential_id = %s AND compteur = %s AND statut = 'actif'
+                RETURNING id;
+                """,
+                (int(nouveau), credential_id, int(ancien)),
+            )
+            return cur.fetchone() is not None
+
 
 # =====================================================================
 # Factory et gestion du cycle de vie
@@ -580,3 +687,23 @@ def set_service_authorization(
 
 def is_service_authorized(user_id: str, service_name: str) -> bool:
     return get_store().is_service_authorized(user_id, service_name)
+
+
+def add_webauthn_credential(
+    user_id: str,
+    credential_id: str,
+    public_key: bytes,
+    sign_count: int,
+    transports: Optional[List[str]] = None,
+) -> bool:
+    return get_store().add_webauthn_credential(
+        user_id, credential_id, public_key, sign_count, transports
+    )
+
+
+def get_webauthn_credentials(user_id: str) -> List[Dict[str, Any]]:
+    return get_store().get_webauthn_credentials(user_id)
+
+
+def update_webauthn_sign_count(credential_id: str, ancien: int, nouveau: int) -> bool:
+    return get_store().update_webauthn_sign_count(credential_id, ancien, nouveau)

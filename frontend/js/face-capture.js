@@ -122,13 +122,16 @@ class FaceCapture {
       throw new Error("Les modèles IA ne sont pas encore prêts.");
     }
 
-    // --- NOUVEAU : test de vie avant l'extraction du descripteur ---
+    // --- Test de vie avant l'extraction du descripteur ---
     // Une photo ne peut pas exécuter les défis → aucun descripteur n'est extrait.
+    // Le rapport d'exécution (types + horodatages) est conservé pour /api/authenticate.
+    this.dernierRapportLiveness = null;
     if (Array.isArray(defis) && defis.length > 0) {
-      await window.LivenessModule.executerDefis(this.videoElement, defis, {
-        onStatus,
-        onErreur,
-      });
+      this.dernierRapportLiveness = await window.LivenessModule.executerDefis(
+        this.videoElement,
+        defis,
+        { onStatus, onErreur },
+      );
     }
 
     console.log(

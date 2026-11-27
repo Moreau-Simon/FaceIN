@@ -10,6 +10,14 @@ Architecture nonce :
 - La consommation du nonce est ATOMIQUE dans VerifierPreuve() côté nœud :
   vérification propriétaire + service_cible + expiry AVANT suppression.
 - L'API valide uniquement le FORMAT du nonce (64 hex chars) avant l'envoi gRPC.
+
+Contrôles de présence (chantier 11) :
+- Rapport de défis de vie OBLIGATOIRE, lié au nonce/utilisateur/service par HMAC
+  (services/liveness.py). Il garantit l'association à la session, pas l'exécution
+  réelle des défis : il est produit par le navigateur.
+- Assertion WebAuthn OBLIGATOIRE dès que le compte possède une passkey active
+  (services/webauthn_service.py) : attestation matérielle avec vérification de
+  l'utilisateur, challenge dérivé du nonce.
 """
 
 import json
@@ -22,7 +30,14 @@ try:
     from services.grpc_bridge import verify_on_nodes
     from services.jwt_manager import generate_token
     from services.rate_limiter import enforce_rate_limit
-    from services.store import get_commitment, is_service_authorized
+    from services.liveness import SERVICE_CIBLE, verifier_rapport
+    from services.store import (
+        get_commitment,
+        get_webauthn_credentials,
+        is_service_authorized,
+        update_webauthn_sign_count,
+    )
+    from services.webauthn_service import ErreurWebAuthn, verifier_assertion
     from services.zkp_verifier import (
         DEFAULT_SEUIL_MAX,
         validate_public_signals_integrity,
@@ -33,7 +48,14 @@ except ImportError:
     from api.services.grpc_bridge import verify_on_nodes
     from api.services.jwt_manager import generate_token
     from api.services.rate_limiter import enforce_rate_limit
-    from api.services.store import get_commitment, is_service_authorized
+    from api.services.liveness import SERVICE_CIBLE, verifier_rapport
+    from api.services.store import (
+        get_commitment,
+        get_webauthn_credentials,
+        is_service_authorized,
+        update_webauthn_sign_count,
+    )
+    from api.services.webauthn_service import ErreurWebAuthn, verifier_assertion
     from api.services.zkp_verifier import (
         DEFAULT_SEUIL_MAX,
         validate_public_signals_integrity,
@@ -46,6 +68,57 @@ router = APIRouter()
 
 # Longueur attendue d'un nonce 256 bits encodé en hexadécimal
 NONCE_HEX_LENGTH = 64
+
+
+def _refus(raison: str, message: str) -> AuthenticateResponse:
+    return AuthenticateResponse(
+        success=False,
+        authenticated=False,
+        reason=raison,
+        raison_refus=raison,
+        message=message,
+    )
+
+
+def _verifier_presence(user_id: str, nonce: str, payload: AuthenticateRequest) -> Optional[AuthenticateResponse]:
+    """Défis de vie puis passkey. Retourne une réponse de refus, ou None si conforme."""
+    ok_liveness, err_liveness = verifier_rapport(user_id, nonce, payload.liveness)
+    if not ok_liveness:
+        logger.warning("[%s] Échec auth - Défis de vie : %s", user_id, err_liveness)
+        return _refus(err_liveness, "Échec de l'authentification : test de vie non conforme.")
+
+    try:
+        credentials = get_webauthn_credentials(user_id)
+    except Exception as exc:
+        logger.error("[%s] Erreur d'accès aux passkeys : %s", user_id, type(exc).__name__)
+        return _refus(
+            "Service de vérification des passkeys indisponible",
+            "Échec de l'authentification : erreur interne de vérification.",
+        )
+
+    if not credentials:
+        return None  # aucun appareil enregistré : ZKP + quorum + défis uniquement
+
+    try:
+        credential_id, ancien, nouveau = verifier_assertion(
+            user_id, nonce, SERVICE_CIBLE, payload.webauthn, credentials
+        )
+    except ErreurWebAuthn as exc:
+        logger.warning("[%s] Échec auth - Passkey : %s", user_id, exc)
+        return _refus(str(exc), "Échec de l'authentification : vérification de l'appareil refusée.")
+
+    try:
+        compteur_ok = update_webauthn_sign_count(credential_id, ancien, nouveau)
+    except Exception as exc:
+        logger.error("[%s] Erreur de mise à jour du compteur de passkey : %s", user_id, type(exc).__name__)
+        compteur_ok = False
+    if not compteur_ok:
+        logger.warning("[%s] Échec auth - Passkey utilisée simultanément ou compteur incohérent.", user_id)
+        return _refus(
+            "Vérification par passkey invalide",
+            "Échec de l'authentification : vérification de l'appareil refusée.",
+        )
+    return None
 
 
 def _mask_commitment(comm: Optional[str]) -> str:
@@ -118,6 +191,11 @@ def authenticate(payload: AuthenticateRequest, request: Request = None) -> Authe
             raison_refus=err_signals,
             message="Échec de l'authentification : signaux publics ZKP non conformes.",
         )
+
+    # Étape 2 bis : Présence réelle (défis de vie liés à la session + passkey si enregistrée)
+    refus_presence = _verifier_presence(user_id, nonce, payload)
+    if refus_presence is not None:
+        return refus_presence
 
     # Étape 3 : Vérification locale de la preuve ZKP (pré-filtre rapide)
     try:

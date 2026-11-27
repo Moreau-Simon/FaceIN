@@ -166,6 +166,25 @@ CREATE TABLE IF NOT EXISTS nonces (
 );
 
 -- ------------------------------------------------------------
+-- Attestation matérielle : passkeys WebAuthn (chantier 11)
+-- Une passkey active rend sa vérification obligatoire pour le compte.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cles_webauthn (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    utilisateur_id       UUID NOT NULL REFERENCES utilisateurs(id) ON DELETE CASCADE,
+    credential_id        VARCHAR(1024) NOT NULL UNIQUE,
+    cle_publique         BYTEA NOT NULL,
+    compteur             BIGINT NOT NULL DEFAULT 0 CHECK (compteur >= 0),
+    transports           VARCHAR(255) NOT NULL DEFAULT '',
+    statut               VARCHAR(20) NOT NULL DEFAULT 'actif' CHECK (statut IN ('actif', 'revoque')),
+    date_creation        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    derniere_utilisation TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_cles_webauthn_utilisateur
+    ON cles_webauthn(utilisateur_id) WHERE statut = 'actif';
+
+-- ------------------------------------------------------------
 -- BLOC M : Migrations Versionnées du Schéma
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -176,4 +195,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 INSERT INTO schema_migrations (version, description)
 VALUES ('001_initial_schema', 'Initialisation du schéma complet avec unicité utilisateurs.nom')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_migrations (version, description)
+VALUES ('002_cles_webauthn', 'Passkeys WebAuthn (attestation matérielle, chantier 11)')
 ON CONFLICT (version) DO NOTHING;

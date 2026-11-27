@@ -291,6 +291,11 @@ class FaceInCore {
             onErreur: (msg) => this.log(`[Liveness] ${msg}`, "warn"),
           });
           this.log(`[Connexion] Vecteur actuel extrait (test de vie réussi).`);
+          const rapportLiveness = {
+            expires_at: nonceData.expires_at,
+            jeton: nonceData.defis_jeton,
+            defis: window.FaceCapture.dernierRapportLiveness || [],
+          };
 
           // Étape 4 : Calcul de l'engagement de référence
           this.log(
@@ -329,6 +334,20 @@ class FaceInCore {
           );
           this.log(`[Connexion] Preuve générée avec succès.`);
 
+          // Étape 5 bis : Attestation matérielle si une passkey est associée au compte
+          let assertionWebauthn = null;
+          if (window.PasskeyManager.aUnePasskey(userId)) {
+            this.updateStatus(
+              "Confirmez avec votre passkey (Windows Hello, Face ID…)...",
+              false,
+              "auth",
+            );
+            this.log("[Connexion] Signature du challenge de session avec la passkey...");
+            assertionWebauthn = await window.PasskeyManager.obtenirAssertion(
+              nonceData.webauthn,
+            );
+          }
+
           // Étape 6 : Envoi de la preuve au serveur
           this.updateStatus("Envoi de la preuve au serveur...", false, "auth");
           const authUrl = `${window.CONFIG.API_BASE_URL}/authenticate`;
@@ -346,6 +365,8 @@ class FaceInCore {
               proof: proof,
               public_signals: publicSignals,
               nonce: nonce,
+              liveness: rapportLiveness,
+              webauthn: assertionWebauthn,
             }),
           });
 
@@ -385,6 +406,7 @@ class FaceInCore {
               `[Connexion] Authentification confirmée avec token ${token}`,
               "success",
             );
+            this.proposerPasskey(userId, authResult.token);
 
             // Transmission automatique du jeton au site partenaire (popup opener) si présent
             if (window.opener && !window.opener.closed) {
@@ -427,6 +449,36 @@ class FaceInCore {
         } finally {
             this.setProcessing(false, 'auth');
         }
+    }
+
+    /**
+     * Propose d'associer une passkey après une connexion réussie (JWT requis par l'API).
+     * Une fois associée, la passkey sera exigée à chaque connexion de ce compte.
+     * @param {string} userId
+     * @param {string} jeton - JWT de la session FaceIN qui vient d'être validée
+     */
+    proposerPasskey(userId, jeton) {
+        const bouton = document.getElementById('btn-passkey');
+        if (!bouton || !jeton || !window.PasskeyManager.estDisponible()
+            || window.PasskeyManager.aUnePasskey(userId)) {
+            return;
+        }
+        bouton.hidden = false;
+        bouton.onclick = async () => {
+            bouton.disabled = true;
+            try {
+                this.log('[Passkey] Création d\'une passkey pour ce compte...');
+                await window.PasskeyManager.enregistrer(userId, jeton);
+                this.updateStatus('✅ Passkey associée : elle sera demandée à chaque connexion.', false, 'auth');
+                this.log('[Passkey] Passkey enregistrée par le serveur.', 'success');
+                bouton.hidden = true;
+            } catch (err) {
+                this.log(`[Passkey] Échec : ${err.message}`, 'error');
+                this.updateStatus(`❌ Passkey non associée : ${err.message}`, true, 'auth');
+            } finally {
+                bouton.disabled = false;
+            }
+        };
     }
 
     /**

@@ -26,6 +26,9 @@ try:
     from routes.authenticate import router as authenticate_router  # noqa: E402
     from routes.nonce import router as nonce_router  # noqa: E402
     from routes.register import router as register_router  # noqa: E402
+    from routes.webauthn import router as webauthn_router  # noqa: E402
+    from services.challenge_secret import verifier_configuration_secret  # noqa: E402
+    from services.webauthn_service import verifier_configuration_webauthn  # noqa: E402
     from services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from services.store import close_store, get_store  # noqa: E402
     from services.zkp_verifier import (  # noqa: E402
@@ -39,6 +42,9 @@ except ImportError:
     from api.routes.authenticate import router as authenticate_router  # noqa: E402
     from api.routes.nonce import router as nonce_router  # noqa: E402
     from api.routes.register import router as register_router  # noqa: E402
+    from api.routes.webauthn import router as webauthn_router  # noqa: E402
+    from api.services.challenge_secret import verifier_configuration_secret  # noqa: E402
+    from api.services.webauthn_service import verifier_configuration_webauthn  # noqa: E402
     from api.services.grpc_bridge import DEFAULT_NODES, fermer_canaux, verifier_sante_noeuds  # noqa: E402
     from api.services.store import close_store, get_store  # noqa: E402
     from api.services.zkp_verifier import (  # noqa: E402
@@ -77,6 +83,9 @@ async def lifespan(app: FastAPI):
     logger.info("Démarrage de la passerelle API FaceIn...")
     # Refus de démarrage si une simulation est active en production (aucune exception silencieuse)
     verifier_absence_mock_en_production()
+    # Secret des challenges (défis de vie, passkeys) et configuration WebAuthn
+    verifier_configuration_secret()
+    verifier_configuration_webauthn()
     try:
         st = get_store()
         if hasattr(st, "ping") and not st.ping():
@@ -190,6 +199,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(register_router, prefix="/api", tags=["Enregistrement"])
 app.include_router(nonce_router, prefix="/api", tags=["Nonce"])
 app.include_router(authenticate_router, prefix="/api", tags=["Authentification"])
+app.include_router(webauthn_router, prefix="/api", tags=["Passkeys"])
 
 
 @app.get("/api/health", response_model=HealthResponse, tags=["Statut"])

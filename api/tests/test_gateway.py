@@ -604,6 +604,19 @@ class TestAuthenticateLogic(unittest.TestCase):
         lo = str(val & ((1 << 128) - 1))
         return [str(commitment), str(seuil or self.DEFAULT_SEUIL), hi, lo]
 
+    def _liveness_for(self, user_id, nonce=None):
+        """Rapport de défis conforme pour la session (dérivé du nonce)."""
+        from services import liveness
+
+        n = nonce or self.valid_nonce
+        expires_at = int(time.time()) + 60
+        defis, jeton = liveness.preparer_defis(user_id, n, expires_at)
+        debut = 1_700_000_000_000
+        executes = []
+        for i, cle in enumerate(defis):
+            executes.append({"type": cle, "debut_ms": debut + i * 2000, "fin_ms": debut + i * 2000 + 900})
+        return {"expires_at": expires_at, "jeton": jeton, "defis": executes}
+
     def test_auth_step1_malformed_nonce_rejected(self):
         from routes.authenticate import authenticate
 
@@ -700,6 +713,7 @@ class TestAuthenticateLogic(unittest.TestCase):
             proof=self.VALID_PROOF,
             public_signals=self._signals_for(commitment),
             nonce=self.valid_nonce,
+            liveness=self._liveness_for(user_id),
         )
         res = authenticate(req)
         self.assertFalse(res.authenticated)
@@ -730,6 +744,7 @@ class TestAuthenticateLogic(unittest.TestCase):
                 proof=self.VALID_PROOF,
                 public_signals=self._signals_for(commitment),
                 nonce=self.valid_nonce,
+                liveness=self._liveness_for(user_id),
             )
             res = authenticate(req)
             self.assertFalse(res.authenticated)
@@ -767,6 +782,7 @@ class TestAuthenticateLogic(unittest.TestCase):
                     proof=self.VALID_PROOF,
                     public_signals=self._signals_for(commitment),
                     nonce=self.valid_nonce,
+                    liveness=self._liveness_for(user_id),
                 )
                 res = authenticate(req)
                 self.assertTrue(res.authenticated)

@@ -5,7 +5,7 @@ et l'uniformité des réponses exposées au frontend.
 """
 
 import re
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 # Ordre du corps fini BN254 (snarkjs / alt_bn128)
@@ -86,8 +86,36 @@ class NonceResponse(BaseModel):
     expires_at: int = Field(..., description="Timestamp Unix d'expiration")
     defis: List[str] = Field(
         default_factory=list,
-        description="Liste ordonnée des défis de vie à exécuter",
+        description="Liste ordonnée des défis de vie à exécuter (dérivée du nonce)",
     )
+    defis_jeton: str = Field(
+        ...,
+        description="Jeton HMAC liant les défis à l'utilisateur, au service, au nonce et à l'expiration",
+    )
+    webauthn: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "Paramètres d'assertion WebAuthn pour cette session (challenge dérivé du nonce). "
+            "Toujours présents, que le compte possède ou non une passkey."
+        ),
+    )
+
+
+# =====================================================================
+# Modèles de défis de vie (liveness)
+# =====================================================================
+class DefiExecute(BaseModel):
+    type: str = Field(..., pattern=r"^[a-z_]{1,32}$", description="Clé du défi (ex. blink)")
+    debut_ms: int = Field(..., ge=0, description="Horodatage client du début du défi (ms)")
+    fin_ms: int = Field(..., ge=0, description="Horodatage client de la réussite du défi (ms)")
+
+
+class LivenessReport(BaseModel):
+    """Rapport d'exécution des défis : lié à la session, mais produit par le navigateur."""
+
+    expires_at: int = Field(..., ge=0, description="Expiration reçue avec le nonce")
+    jeton: str = Field(..., pattern=r"^[0-9a-fA-F]{64}$", description="defis_jeton reçu avec le nonce")
+    defis: List[DefiExecute] = Field(..., min_length=1, max_length=16)
 
 
 # =====================================================================
@@ -105,6 +133,14 @@ class AuthenticateRequest(BaseModel):
         description="Signaux publics du circuit : [0]=engagement, [1]=seuil (optionnel)",
     )
     nonce: str = Field(..., description="Nonce cryptographique reçu lors de l'étape de défi")
+    liveness: Optional[LivenessReport] = Field(
+        None,
+        description="Rapport d'exécution des défis de vie (obligatoire, refus explicite s'il manque)",
+    )
+    webauthn: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Assertion WebAuthn (PublicKeyCredential JSON), obligatoire si le compte a une passkey",
+    )
 
     @field_validator("user_id")
     @classmethod
@@ -146,6 +182,44 @@ class AuthenticateResponse(BaseModel):
     reason: Optional[str] = Field(None, description="Raison en cas de refus (compatibilité backend)")
     raison_refus: Optional[str] = Field(None, description="Raison en cas de refus (compatibilité frontend)")
     message: str = Field(..., description="Message informatif")
+
+
+# =====================================================================
+# Modèles d'enregistrement de passkey (WebAuthn)
+# =====================================================================
+class PasskeyOptionsRequest(BaseModel):
+    user_id: str = Field(..., description="Identifiant de l'utilisateur authentifié")
+
+    @field_validator("user_id")
+    @classmethod
+    def check_user_id(cls, v: str) -> str:
+        return validate_user_id_format(v)
+
+
+class PasskeyOptionsResponse(BaseModel):
+    success: bool = Field(True)
+    options: Dict[str, Any] = Field(..., description="PublicKeyCredentialCreationOptions (JSON)")
+    challenge: str = Field(..., description="Challenge base64url à renvoyer à la vérification")
+    expires_at: int = Field(..., description="Expiration de la demande d'enregistrement")
+    jeton: str = Field(..., description="Jeton HMAC de la demande d'enregistrement")
+
+
+class PasskeyVerifyRequest(BaseModel):
+    user_id: str = Field(..., description="Identifiant de l'utilisateur authentifié")
+    credential: Dict[str, Any] = Field(..., description="Réponse de navigator.credentials.create (JSON)")
+    challenge: str = Field(..., pattern=r"^[A-Za-z0-9_-]{16,128}$")
+    expires_at: int = Field(..., ge=0)
+    jeton: str = Field(..., pattern=r"^[0-9a-fA-F]{64}$")
+
+    @field_validator("user_id")
+    @classmethod
+    def check_user_id(cls, v: str) -> str:
+        return validate_user_id_format(v)
+
+
+class PasskeyVerifyResponse(BaseModel):
+    success: bool = Field(True)
+    message: str = Field(...)
 
 
 # =====================================================================

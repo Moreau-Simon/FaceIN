@@ -7,29 +7,35 @@ L'API ne stocke PAS le nonce localement : seul le nœud gère son cycle de vie
 
 Fournit au client un défi cryptographique aléatoire de 32 octets (64 caractères
 hexadécimaux) valide pendant 60 secondes pour la construction de la preuve ZKP,
-accompagné d'une liste aléatoire de défis de vie (liveness).
+accompagné :
+- des défis de vie DÉRIVÉS de ce nonce (services/liveness.py) et de leur jeton HMAC ;
+- des paramètres d'assertion WebAuthn dont le challenge est dérivé du nonce
+  (services/webauthn_service.py). Ils sont renvoyés pour tous les comptes afin de ne
+  pas révéler si un compte possède une passkey.
 """
 
 import logging
-import secrets
 from fastapi import APIRouter, HTTPException, Request, status
 
 try:
     from models import NonceResponse, validate_user_id_format
     from services.grpc_bridge import request_nonce_from_node
+    from services.liveness import SERVICE_CIBLE, preparer_defis
     from services.rate_limiter import enforce_rate_limit
+    from services.webauthn_service import challenge_authentification_b64, rp_id
 except ImportError:
     from api.models import NonceResponse, validate_user_id_format
     from api.services.grpc_bridge import request_nonce_from_node
+    from api.services.liveness import SERVICE_CIBLE, preparer_defis
     from api.services.rate_limiter import enforce_rate_limit
+    from api.services.webauthn_service import challenge_authentification_b64, rp_id
 
 logger = logging.getLogger("facein.routes.nonce")
 
 router = APIRouter()
 
-# --- Défis de vie supportés par le frontend (clés reconnues par liveness.js) ---
-DEFIS_DISPONIBLES = ["blink", "turn_left", "turn_right", "smile"]
-NOMBRE_DEFIS = 2
+# Délai laissé au navigateur pour l'assertion WebAuthn (ms)
+WEBAUTHN_TIMEOUT_MS = 60_000
 
 
 @router.get(
@@ -85,9 +91,8 @@ def get_nonce(user_id: str, request: Request = None) -> NonceResponse:
         expires_at,
     )
 
-    # --- Tirage aléatoire cryptographiquement sûr des défis de vie ---
-    crypto_rng = secrets.SystemRandom()
-    defis = crypto_rng.sample(DEFIS_DISPONIBLES, k=min(NOMBRE_DEFIS, len(DEFIS_DISPONIBLES)))
+    # --- Défis de vie dérivés du nonce (HMAC) et liés à la session ---
+    defis, defis_jeton = preparer_defis(user_id_clean, nonce, int(expires_at))
     logger.info("Défis de vie imposés à '%s' : %s", user_id_clean, ", ".join(defis))
 
     return NonceResponse(
@@ -95,4 +100,11 @@ def get_nonce(user_id: str, request: Request = None) -> NonceResponse:
         nonce=nonce,
         expires_at=int(expires_at),
         defis=defis,
+        defis_jeton=defis_jeton,
+        webauthn={
+            "challenge": challenge_authentification_b64(user_id_clean, nonce, SERVICE_CIBLE),
+            "rpId": rp_id(),
+            "timeout": WEBAUTHN_TIMEOUT_MS,
+            "userVerification": "required",
+        },
     )

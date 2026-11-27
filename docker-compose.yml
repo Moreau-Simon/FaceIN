@@ -118,6 +118,10 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-facein-dev-jwt-secret-key-not-for-prod}
       - JWT_ENV=${JWT_ENV:-development}
       - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-3600}
+      # Secret des défis de vie et des passkeys (vide en dev : secret aléatoire par processus)
+      - FACEIN_CHALLENGE_SECRET=${FACEIN_CHALLENGE_SECRET:-}
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:-localhost}
+      - WEBAUTHN_ORIGINS=${WEBAUTHN_ORIGINS:-http://localhost:3000}
       - TLS_ENABLED=true
       - TLS_CA_CERT=/app/certs/ca.crt
       - TLS_CERT=/app/certs/api-gateway.crt

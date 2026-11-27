@@ -2,7 +2,8 @@
 # Usage : docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Exigences :
-# - Toutes les variables sensibles (POSTGRES_PASSWORD, JWT_SECRET_KEY) sont OBLIGATOIRES.
+# - Toutes les variables sensibles (POSTGRES_PASSWORD, JWT_SECRET_KEY,
+#   FACEIN_CHALLENGE_SECRET) et la configuration WebAuthn sont OBLIGATOIRES.
 # - Le port PostgreSQL n'est pas exposé sur l'hôte.
 # - Aucun mode mock ZKP n'est autorisé : FACEIN_ENV=production fait refuser le
 #   démarrage de l'API et des nœuds si MOCK_ZKP_VERIFICATION est actif.
@@ -55,6 +56,9 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY requis en production}
       - JWT_SECRET_KEY_PREVIOUS=${JWT_SECRET_KEY_PREVIOUS:-}
       - JWT_EXPIRATION_SECONDS=${JWT_EXPIRATION_SECONDS:-3600}
+      - FACEIN_CHALLENGE_SECRET=${FACEIN_CHALLENGE_SECRET:?FACEIN_CHALLENGE_SECRET requis en production}
+      - WEBAUTHN_RP_ID=${WEBAUTHN_RP_ID:?WEBAUTHN_RP_ID requis en production}
+      - WEBAUTHN_ORIGINS=${WEBAUTHN_ORIGINS:?WEBAUTHN_ORIGINS (https) requis en production}
       - MOCK_ZKP_VERIFICATION=false
       - TLS_ENABLED=true
       - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER requis}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis}@db:5432/${POSTGRES_DB:?POSTGRES_DB requis}

@@ -78,6 +78,11 @@
                 🛡️ Se connecter (Prouver avec ZKP)
             </button>
 
+            <!-- Proposé après une connexion réussie : la passkey devient ensuite obligatoire -->
+            <button id="btn-passkey" class="btn-primary" type="button" hidden>
+                🔑 Associer une passkey à ce compte
+            </button>
+
             <!-- Zone de statut Connexion -->
             <div id="status-auth" class="status-box status-info" role="status">
                 Prêt pour l'authentification.
@@ -123,6 +128,7 @@
 <script src="js/face-capture.js"></script>
 <script src="js/zkp-engine.js"></script>
 <script src="js/liveness.js"></script>
+<script src="js/passkey.js"></script>
 <script src="js/facein-core.js"></script>
 
 </body>

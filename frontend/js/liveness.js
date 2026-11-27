@@ -350,6 +350,9 @@ class LivenessModule {
    * @param {HTMLVideoElement} video
    * @param {string[]} defis - clés tirées par l'API (ex: ["blink", "smile"])
    * @param {Object} callbacks - { onStatus(message), onErreur(message) }
+   * @returns {Promise<Array<{type: string, debut_ms: number, fin_ms: number}>>}
+   *   Rapport d'exécution transmis à /api/authenticate (lié à la session par le
+   *   serveur ; il ne constitue PAS à lui seul une preuve d'exécution réelle).
    * @throws {Error} si un défi n'est pas exécuté dans le délai imparti
    */
   async executerDefis(video, defis, callbacks = {}) {
@@ -373,11 +376,16 @@ class LivenessModule {
     }
 
     // 2. Exécution séquentielle des défis imposés par le serveur
+    const rapport = [];
     for (const cle of defis) {
       const defi = this._DEFIS[cle];
-      if (!defi) continue; // clé inconnue : ignorée (compatibilité future)
+      if (!defi) {
+        // Le serveur exige la liste exacte : un défi inconnu ne peut pas être ignoré
+        throw new Error(`Défi de vie non pris en charge par ce client : « ${cle} ».`);
+      }
       this._texteCourant = defi.texte;
       onStatus(`Test de vie : ${defi.texte}`);
+      const debut = Date.now();
       const reussi = await defi.tester(video, ref, this);
       if (!reussi) {
         onErreur(
@@ -388,6 +396,7 @@ class LivenessModule {
             "Authentification refusée (protection anti-photo).",
         );
       }
+      rapport.push({ type: cle, debut_ms: debut, fin_ms: Date.now() });
     }
 
     // Petite pause : l'utilisateur vient d'exécuter les défis (tête tournée,
@@ -399,7 +408,7 @@ class LivenessModule {
     await this._attendre(2000);
     onStatus("Test de vie réussi ✔");
     this._onStatus = null;
-    return true;
+    return rapport;
   }
 }
 

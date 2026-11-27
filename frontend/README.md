@@ -121,10 +121,28 @@ npx serve frontend -p 3000
 1. Saisissez votre pseudo (doit correspondre à l'inscription).
 2. Cliquez sur **Se connecter** :
    - Le vecteur de référence est extrait de l'IndexedDB locale.
-   - Un nouveau vecteur du jour est capturé via la caméra.
    - Le client réclame un nonce anti-rejeu frais via `GET http://localhost:8000/api/nonce/{userId}`.
+     La réponse contient aussi les **défis de vie** (dérivés du nonce par le serveur), leur
+     jeton `defis_jeton` et les paramètres `webauthn` de la session.
+   - Les défis sont exécutés devant la caméra (`js/liveness.js`) ; leur rapport (types et
+     horodatages) est conservé. Le vecteur du jour n'est extrait qu'après les défis.
+   - Si une passkey est associée au compte, l'appareil signe le challenge de session après
+     vérification de l'utilisateur (Windows Hello, Face ID…) (`js/passkey.js`).
    - Le moteur ZKP génère une preuve Groth16 prouvant que :
-     1. La distance euclidienne au carré entre les deux vecteurs est $\le \text{seuil}$ (`6000000`).
+     1. La distance euclidienne au carré entre les deux vecteurs est $\le$ `seuilMax` (`16000000`, imposé par le serveur).
      2. Le haché Poseidon du vecteur de référence correspond exactement à l'engagement public.
-   - La preuve et les signaux publics sont envoyés via `POST http://localhost:8000/api/authenticate`.
+     3. La preuve est liée au nonce de session (`nonceHi`, `nonceLo`).
+   - La preuve, les signaux publics, le rapport de défis et l'éventuelle assertion passkey sont
+     envoyés via `POST http://localhost:8000/api/authenticate`.
    - Le réseau valide la preuve sans jamais avoir eu accès au visage ni aux vecteurs.
+3. Après une connexion réussie, le bouton **Associer une passkey** permet d'ajouter une passkey
+   au compte (le JWT de la session est exigé par l'API). Elle devient ensuite obligatoire à
+   chaque connexion de ce compte.
+
+### Test de vie et passkeys : garanties et limites
+| Contrôle | Garantie côté serveur | Limite |
+|---|---|---|
+| Défis de vie (`liveness.js`) | Les défis sont imposés par le serveur, liés à l'utilisateur, au service et au nonce (HMAC) ; un rapport ne peut être ni rejoué, ni transposé à une autre session ; ordre et chronologie contrôlés ; un client sans module de liveness est refusé | Le rapport est produit par le navigateur : un client modifié peut le forger. Ce n'est **pas** une preuve d'exécution réelle devant la caméra |
+| Passkey WebAuthn (`passkey.js`) | Signature d'un authentificateur enregistré, après vérification locale de l'utilisateur, sur un challenge dérivé du nonce (usage unique) ; origine et compteur vérifiés | Prouve la présence de l'utilisateur sur l'appareil enregistré, pas que le visage capturé par FaceIN est le sien |
+
+Aucune image ni aucun vecteur facial n'est envoyé au serveur pour ces contrôles.

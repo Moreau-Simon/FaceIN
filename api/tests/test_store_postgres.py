@@ -345,6 +345,33 @@ class TestStorePostgresIntegration(unittest.TestCase):
         self.assertEqual(self.pg.get_engagement("pg_gina")["commitment"], "777")
         self.assertTrue(self.pg.is_jti_revoked("pg-jti-persist"))
 
+    def test_postgres_passkeys_ajout_doublon_et_compteur_conditionnel(self):
+        self.pg.save_engagement("pg_henri", "1")
+        self.assertTrue(self.pg.add_webauthn_credential("pg_henri", "cred-1", b"\x01\x02", 0, ["internal"]))
+        self.assertFalse(self.pg.add_webauthn_credential("pg_henri", "cred-1", b"\x03", 0, []))
+        self.assertFalse(self.pg.add_webauthn_credential("pg_inconnu", "cred-2", b"\x03", 0, []))
+        creds = self.pg.get_webauthn_credentials("pg_henri")
+        self.assertEqual(len(creds), 1)
+        self.assertEqual(creds[0]["public_key"], b"\x01\x02")
+        self.assertEqual(creds[0]["transports"], ["internal"])
+        self.assertTrue(self.pg.update_webauthn_sign_count("cred-1", 0, 5))
+        self.assertFalse(self.pg.update_webauthn_sign_count("cred-1", 0, 6))  # valeur périmée
+        self.assertEqual(self.pg.get_webauthn_credentials("pg_henri")[0]["sign_count"], 5)
+
+    def test_postgres_passkeys_utilisations_concurrentes_une_seule_reussit(self):
+        self.pg.save_engagement("pg_iris", "1")
+        self.pg.add_webauthn_credential("pg_iris", "cred-conc", b"\x01", 3, [])
+        nb = 12
+        barriere = threading.Barrier(nb)
+
+        def utiliser(_):
+            barriere.wait(timeout=10)
+            return self.pg.update_webauthn_sign_count("cred-conc", 3, 4)
+
+        with ThreadPoolExecutor(max_workers=nb) as pool:
+            resultats = list(pool.map(utiliser, range(nb)))
+        self.assertEqual(resultats.count(True), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

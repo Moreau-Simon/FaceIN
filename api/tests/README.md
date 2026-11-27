@@ -31,6 +31,8 @@ peut pas réussir grâce à un mock positif.
 | Unitaires (validation API, nonces, stockage, JWT, signaux publics) | `api/tests/test_gateway.py` |
 | Anti-mock en production, concurrence | `api/tests/test_security_hardening.py` |
 | Cryptographie Groth16 réelle | `api/tests/test_zkp_crypto.py` |
+| Défis de vie liés à la session (B) | `api/tests/test_liveness.py` |
+| Passkeys WebAuthn (C), authentificateur logiciel réel | `api/tests/test_webauthn.py` |
 | PostgreSQL (unitaires + intégration réelle) | `api/tests/test_store_postgres.py` |
 | Consensus, réseau, Merkle, révocation, configuration | `nodes/node/tests/` |
 
@@ -67,6 +69,16 @@ que `nodes/shared/verification_key.json` en est issue. **Ces deux tests échouen
 dépôt n'ont pas été régénérées** (la zkey du frontend date de l'ancien circuit à 2 signaux publics).
 
 > Ces cérémonies à un seul contributeur ne remplacent pas une véritable cérémonie de confiance.
+
+### Défis de vie et passkeys (`test_liveness.py`, `test_webauthn.py`)
+
+Aucune dépendance externe : `test_webauthn.py` utilise un authentificateur FIDO2 **logiciel**
+(clé ECDSA P-256 réelle, données CBOR et signatures réelles) vérifié par la bibliothèque `webauthn`.
+
+`test_contournement_simule_cote_frontend_limite_documentee` vérifie volontairement qu'un client
+modifié peut forger un rapport de défis accepté : c'est la limite connue de l'architecture B.
+`test_compte_avec_passkey_sans_assertion_refuse` montre que ce même client est refusé dès que le
+compte possède une passkey (architecture C).
 
 ### PostgreSQL réel (`TestStorePostgresIntegration`)
 
