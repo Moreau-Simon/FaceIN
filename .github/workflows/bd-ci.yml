@@ -1,0 +1,220 @@
+# ==============================================================================
+# FaceIN — CI Base de données (PostgreSQL)
+# ==============================================================================
+# Périmètre : 01_schema.sql et la couche de persistance de l'API
+# (api/services/store.py).
+#
+#   schema          Application du schéma sur une base vide, réapplication
+#                   (idempotence), tables et migrations attendues, absence
+#                   d'instruction destructive
+#   tests-store     Tests unitaires et d'intégration du store sur un
+#                   PostgreSQL 16 réel (doublons, concurrence, nonces,
+#                   passkeys, fermeture et réouverture du pool)
+#   persistance     Données conservées après redémarrage du conteneur
+#                   PostgreSQL (volume Docker)
+#
+# Aucune base de production n'est utilisée : toutes les bases sont éphémères.
+# ==============================================================================
+
+name: BD CI
+
+on:
+  push:
+    branches: ["main", "develop", "gestion_backend"]
+    paths:
+      - "01_schema.sql"
+      - "api/services/store.py"
+      - "api/tests/test_store_postgres.py"
+      - "api/requirements.txt"
+      - "docker-compose*.yml"
+      - ".github/workflows/bd-ci.yml"
+  pull_request:
+    paths:
+      - "01_schema.sql"
+      - "api/services/store.py"
+      - "api/tests/test_store_postgres.py"
+      - "api/requirements.txt"
+      - "docker-compose*.yml"
+      - ".github/workflows/bd-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  POSTGRES_IMAGE: "postgres:16-alpine"   # même image que docker-compose.yml
+  PGPASSWORD: facein_test_password
+
+jobs:
+  # ---------------------------------------------------------------------------
+  schema:
+    name: Schéma SQL et migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: facein_schema
+          POSTGRES_USER: facein_test
+          POSTGRES_PASSWORD: facein_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Client PostgreSQL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Aucune instruction destructive dans le schéma
+        if: hashFiles('01_schema.sql') != ''
+        run: |
+          if grep -inE '^\s*(DROP|TRUNCATE|DELETE\s+FROM)\b' 01_schema.sql; then
+            echo "::error file=01_schema.sql::Instruction destructive dans le schéma d'initialisation."
+            exit 1
+          fi
+          echo "Aucune instruction destructive."
+
+      - name: Application puis réapplication (idempotence)
+        if: hashFiles('01_schema.sql') != ''
+        run: |
+          for passage in 1 2; do
+            echo "== Passage $passage"
+            psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U facein_test -d facein_schema -f 01_schema.sql
+          done
+
+      - name: Tables et migrations attendues
+        if: hashFiles('01_schema.sql') != ''
+        run: |
+          requete() { psql -h 127.0.0.1 -U facein_test -d facein_schema -tAc "$1"; }
+          erreurs=0
+          for table in utilisateurs engagements_cryptographiques nonces schema_migrations; do
+            if [ "$(requete "SELECT to_regclass('public.$table') IS NOT NULL")" != "t" ]; then
+              echo "::error::Table manquante : $table"; erreurs=1
+            fi
+          done
+          if [ "$(requete "SELECT count(*) FROM pg_indexes WHERE tablename='utilisateurs' AND indexdef ILIKE '%UNIQUE%(nom)%'")" = "0" ]; then
+            echo "::error::Contrainte d'unicité absente sur utilisateurs.nom"; erreurs=1
+          fi
+          echo "Migrations appliquées :"
+          requete "SELECT version || ' — ' || coalesce(description, '') FROM schema_migrations ORDER BY version"
+          declarees=$(grep -oE "VALUES \('[0-9]{3}_[a-z0-9_]+'" 01_schema.sql | wc -l)
+          appliquees=$(requete "SELECT count(*) FROM schema_migrations")
+          if [ "$declarees" != "$appliquees" ]; then
+            echo "::error::Migrations déclarées ($declarees) ≠ appliquées ($appliquees)"; erreurs=1
+          fi
+          exit $erreurs
+
+  # ---------------------------------------------------------------------------
+  tests-store:
+    name: Store PostgreSQL réel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: facein_test
+          POSTGRES_USER: facein_test
+          POSTGRES_PASSWORD: facein_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Présence de l'API
+        id: api
+        run: |
+          if [ -f api/services/store.py ]; then echo "presente=true" >> "$GITHUB_OUTPUT"; else echo "presente=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-python@v5
+        if: steps.api.outputs.presente == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Installer les dépendances
+        if: steps.api.outputs.presente == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt pytest
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Initialiser le schéma de test
+        if: steps.api.outputs.presente == 'true'
+        run: psql -v ON_ERROR_STOP=1 -q -h 127.0.0.1 -U facein_test -d facein_test -f 01_schema.sql
+
+      - name: Tests du store PostgreSQL
+        if: steps.api.outputs.presente == 'true'
+        env:
+          STORE_BACKEND: postgres
+          TEST_POSTGRES_URL: postgresql://facein_test:facein_test_password@127.0.0.1:5432/facein_test
+        run: python -m pytest api/tests/test_store_postgres.py -v
+
+  # ---------------------------------------------------------------------------
+  persistance:
+    name: Persistance après redémarrage du conteneur
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Démarrer PostgreSQL avec un volume
+        run: |
+          docker volume create facein_ci_pgdata
+          docker run -d --name facein-ci-db \
+            -e POSTGRES_DB=facein -e POSTGRES_USER=facein_test -e POSTGRES_PASSWORD="$PGPASSWORD" \
+            -v facein_ci_pgdata:/var/lib/postgresql/data \
+            -v "$PWD/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro" \
+            "$POSTGRES_IMAGE"
+
+      - name: Attendre l'initialisation et écrire des données
+        run: |
+          attendre() {
+            for tentative in $(seq 1 30); do
+              if docker exec facein-ci-db pg_isready -U facein_test -d facein > /dev/null 2>&1 \
+                && docker exec facein-ci-db psql -U facein_test -d facein -tAc "SELECT 1" > /dev/null 2>&1; then
+                return 0
+              fi
+              sleep 2
+            done
+            docker logs facein-ci-db
+            return 1
+          }
+          attendre
+          # Le schéma d'initialisation doit avoir été exécuté par l'entrypoint
+          docker exec facein-ci-db psql -v ON_ERROR_STOP=1 -U facein_test -d facein -c \
+            "INSERT INTO utilisateurs (nom) VALUES ('persistance_ci');"
+
+      - name: Redémarrer le conteneur et relire les données
+        run: |
+          docker restart facein-ci-db
+          for tentative in $(seq 1 30); do
+            if docker exec facein-ci-db psql -U facein_test -d facein -tAc "SELECT 1" > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          resultat=$(docker exec facein-ci-db psql -U facein_test -d facein -tAc \
+            "SELECT count(*) FROM utilisateurs WHERE nom = 'persistance_ci'")
+          echo "Lignes retrouvées après redémarrage : $resultat"
+          [ "$resultat" = "1" ]
+
+      - name: Nettoyer
+        if: always()
+        run: |
+          docker rm -f facein-ci-db || true
+          docker volume rm facein_ci_pgdata || true

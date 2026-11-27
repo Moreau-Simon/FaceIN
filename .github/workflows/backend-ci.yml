@@ -1,0 +1,438 @@
+# ==============================================================================
+# FaceIN — CI Backend (API Gateway, circuit ZKP, stack complète)
+# ==============================================================================
+# Périmètre : api/, circuits/, scripts/ et l'intégration de bout en bout de
+# toute la stack (API + nœuds + PostgreSQL + frontend).
+#
+#   detect            Composants présents (api/, circuits/)
+#   lint              flake8 (erreurs bloquantes) sur api/ et scripts/,
+#                     shellcheck sur les scripts du backend et du circuit
+#   compose           docker-compose.yml et surcharge de production (aucune
+#                     simulation active en production)
+#   tests-api         api/tests hors Groth16 + tests du store mémoire
+#                     (MOCK_ZKP_VERIFICATION=false), avec couverture
+#   tests-zkp-reel    Preuves Groth16 réelles (cérémonie de TEST jetable) et
+#                     cohérence des clés livrées dans le dépôt
+#   circuits          Compilation du circuit, setup Groth16, npm test ; publie
+#                     la clé de vérification, le WASM et la zkey produits
+#   docker-e2e        Stack Docker complète construite avec les clés du job
+#                     circuits, puis parcours d'authentification réel de bout en
+#                     bout (scripts/e2e_authentication.py)
+#   audit             pip-audit et npm audit (informatif, non bloquant)
+#
+# Les autres domaines ont leur propre workflow : frontend-ci.yml, bd-ci.yml
+# (schéma et store PostgreSQL), reseau-ci.yml (nœuds gRPC, mTLS).
+#
+# Aucune simulation positive : aucun job n'active MOCK_ZKP_VERIFICATION.
+# Les clés ZKP de docker-e2e sont des clés de CI (cérémonie à un seul
+# contributeur) : elles ne remplacent jamais des clés de production.
+# ==============================================================================
+
+name: Backend CI
+
+on:
+  push:
+    branches: ["main", "develop", "gestion_backend"]
+    paths:
+      - "api/**"
+      - "circuits/**"
+      - "scripts/**"
+      - "nodes/**"
+      - "frontend/circuit/**"
+      - "01_schema.sql"
+      - "docker-compose*.yml"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "api/**"
+      - "circuits/**"
+      - "scripts/**"
+      - "nodes/**"
+      - "frontend/circuit/**"
+      - "01_schema.sql"
+      - "docker-compose*.yml"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"     # version des images Docker (python:3.12-slim)
+  NODE_VERSION: "20"
+  CIRCOM_VERSION: "v2.1.9"
+  FLAKE8_VERSION: "7.3.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  detect:
+    name: Détection des composants
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      api: ${{ steps.composants.outputs.api }}
+      circuits: ${{ steps.composants.outputs.circuits }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Identifier les dossiers présents
+        id: composants
+        run: |
+          for dossier in api circuits; do
+            if [ -d "$dossier" ]; then valeur=true; else valeur=false; fi
+            echo "${dossier}=${valeur}" >> "$GITHUB_OUTPUT"
+          done
+
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint Python et shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: flake8 (erreurs bloquantes)
+        run: |
+          pip install "flake8==${FLAKE8_VERSION}"
+          cibles=""
+          for dossier in api scripts; do
+            if [ -d "$dossier" ]; then cibles="$cibles $dossier"; fi
+          done
+          if [ -z "$cibles" ]; then echo "Rien à analyser."; exit 0; fi
+          # shellcheck disable=SC2086
+          flake8 $cibles --count --select=E9,F63,F7,F82 --show-source --statistics \
+            --exclude="*_pb2.py,*_pb2_grpc.py,node_modules"
+
+      - name: shellcheck (scripts du backend et du circuit)
+        run: |
+          fichiers=$(git ls-files 'scripts/*.sh' 'circuits/*.sh' 'circuits/test/*.sh' \
+            ':!:scripts/generate-test-certs.sh' ':!:scripts/creation_cert.sh' ':!:**/node_modules/**')
+          if [ -n "$fichiers" ]; then
+            # shellcheck disable=SC2086
+            shellcheck --severity=error $fichiers
+          fi
+
+  # ---------------------------------------------------------------------------
+  compose:
+    name: Configuration Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker-compose.yml (développement)
+        run: docker compose config --quiet
+
+      # Variables factices : vérifie seulement que la surcharge de production est
+      # valide, qu'aucune variable obligatoire n'y manque et qu'aucune simulation
+      # n'y est active.
+      - name: docker-compose.prod.yml (production)
+        if: hashFiles('docker-compose.prod.yml') != ''
+        env:
+          POSTGRES_DB: facein
+          POSTGRES_USER: facein
+          POSTGRES_PASSWORD: ci-factice
+          JWT_SECRET_KEY: ci-factice-0123456789abcdef0123456789abcdef
+          FACEIN_CHALLENGE_SECRET: ci-factice-0123456789abcdef0123456789abcdef
+          WEBAUTHN_RP_ID: facein.example
+          WEBAUTHN_ORIGINS: https://facein.example
+        run: |
+          rendu=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config)
+          if echo "$rendu" | grep -qE 'MOCK_ZKP_VERIFICATION: "?(true|1|yes)"?'; then
+            echo "::error::Simulation ZKP active dans la configuration de production."
+            exit 1
+          fi
+          echo "Configuration de production valide."
+
+  # ---------------------------------------------------------------------------
+  tests-api:
+    name: Tests API Gateway
+    needs: detect
+    if: needs.detect.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # Les tests de sécurité et de concurrence importent aussi des modules des nœuds.
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt -r nodes/node/requirements.txt pytest pytest-cov
+
+      - name: Générer le code protobuf
+        run: |
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=api --grpc_python_out=api nodes/shared/proto/verification.proto
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=nodes/node --grpc_python_out=nodes/node nodes/shared/proto/*.proto
+
+      - name: Lancer les tests
+        env:
+          MOCK_ZKP_VERIFICATION: "false"
+        run: |
+          cibles="api/tests"
+          if [ -f api/services/test_store.py ]; then cibles="$cibles api/services/test_store.py"; fi
+          # shellcheck disable=SC2086
+          python -m pytest $cibles -v --ignore=api/tests/test_zkp_crypto.py \
+            --cov=api --cov-report=term-missing
+
+  # ---------------------------------------------------------------------------
+  tests-zkp-reel:
+    name: Tests cryptographiques Groth16 réels
+    needs: detect
+    if: needs.detect.outputs.api == 'true' && needs.detect.outputs.circuits == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: circuits/package-lock.json
+
+      - name: Installer circom
+        run: |
+          curl -fsSL -o /usr/local/bin/circom \
+            "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64"
+          chmod +x /usr/local/bin/circom
+          circom --version
+
+      - name: Installer les dépendances
+        run: |
+          (cd circuits && npm ci)
+          python -m pip install --upgrade pip
+          pip install -r api/requirements.txt -r nodes/node/requirements.txt pytest
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=nodes/node --grpc_python_out=nodes/node nodes/shared/proto/*.proto
+
+      - name: Générer les artefacts Groth16 de test
+        run: bash scripts/generate_test_zkp_artifacts.sh
+
+      # Inclut TestCoherenceClesDuDepot : échoue tant que les clés livrées dans
+      # frontend/circuit et nodes/shared ne proviennent pas du circuit courant.
+      - name: Lancer les tests cryptographiques
+        env:
+          FACEIN_REQUIRE_REAL_ZKP: "1"
+          MOCK_ZKP_VERIFICATION: "false"
+        run: |
+          export PATH="$GITHUB_WORKSPACE/circuits/node_modules/.bin:$PATH"
+          python -m pytest api/tests/test_zkp_crypto.py -v
+
+  # ---------------------------------------------------------------------------
+  circuits:
+    name: Circuit ZKP (Circom + Groth16)
+    needs: detect
+    if: needs.detect.outputs.circuits == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: circuits/package-lock.json
+
+      - name: Installer circom
+        run: |
+          curl -fsSL -o /usr/local/bin/circom \
+            "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64"
+          chmod +x /usr/local/bin/circom
+          circom --version
+
+      - name: Installer les dépendances npm
+        working-directory: circuits
+        run: npm ci
+
+      - name: Compiler le circuit et réaliser le setup Groth16 (clés de CI)
+        working-directory: circuits
+        run: ./build.sh
+
+      - name: Tests du circuit (preuve valide, rejet de l'imposteur)
+        working-directory: circuits
+        run: npm test
+
+      # Clés de CI cohérentes entre elles (prouveur + vérificateur), utilisées
+      # par docker-e2e à la place des clés livrées dans le dépôt.
+      - name: Publier les clés du circuit
+        uses: actions/upload-artifact@v4
+        with:
+          name: cles-circuit-ci
+          path: |
+            circuits/build/verification_key.json
+            circuits/build/distance.zkey
+            circuits/build/distance_js/distance.wasm
+          if-no-files-found: error
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  docker-e2e:
+    name: Docker — stack complète et authentification de bout en bout
+    needs: [detect, circuits]
+    # Évalué même sans circuits/ (branches réduites) ; ignoré si circuits a échoué.
+    if: ${{ always() && needs.detect.result == 'success' && needs.circuits.result != 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Récupérer les clés du circuit
+        if: needs.circuits.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: cles-circuit-ci
+          path: cles-ci
+
+      # Les images API et nœuds copient nodes/shared/verification_key.json ; le
+      # frontend sert frontend/circuit. On y place les clés de CI cohérentes.
+      - name: Installer les clés de CI dans l'arborescence
+        if: needs.circuits.result == 'success'
+        run: |
+          cp cles-ci/verification_key.json nodes/shared/verification_key.json
+          mkdir -p frontend/circuit circuits/build/distance_js
+          cp cles-ci/distance_js/distance.wasm frontend/circuit/distance.wasm
+          cp cles-ci/distance.zkey frontend/circuit/distance.zkey
+          cp cles-ci/distance_js/distance.wasm circuits/build/distance_js/distance.wasm
+          cp cles-ci/distance.zkey circuits/build/distance.zkey
+
+      - name: Générer les certificats TLS de test
+        run: |
+          bash scripts/generate-test-certs.sh
+          echo "TLS_CA_CERT_HOST_PATH=./certs/ca.crt" >> "$GITHUB_ENV"
+
+      - name: Construire et démarrer la stack
+        env:
+          FACEIN_CHALLENGE_SECRET: ci-e2e-0123456789abcdef0123456789abcdef
+        run: docker compose up -d --build
+
+      - name: Health checks
+        run: |
+          services=$(docker compose config --services | sort -u)
+
+          if echo "$services" | grep -q '^api$'; then
+            api_ok=0
+            for tentative in $(seq 1 24); do
+              sante=$(curl -fsS http://localhost:8000/api/health || true)
+              if echo "$sante" | grep -q '"statut":"en_ligne"'; then
+                api_ok=1
+                break
+              fi
+              sleep 5
+            done
+            echo "Santé de l'API : $sante"
+            if [ "$api_ok" -ne 1 ]; then
+              echo "::error::L'API n'est pas en ligne (stockage, ZKP ou quorum) après 120 s."
+              exit 1
+            fi
+          fi
+
+          if echo "$services" | grep -q '^frontend$'; then
+            front_ok=0
+            for tentative in $(seq 1 12); do
+              if curl -fsS -o /dev/null http://localhost:3000/ \
+                && curl -fsS -o /dev/null http://localhost:3000/circuit/distance.wasm; then
+                front_ok=1
+                break
+              fi
+              sleep 5
+            done
+            if [ "$front_ok" -ne 1 ]; then
+              echo "::error::Frontend inaccessible sur le port 3000."
+              exit 1
+            fi
+            echo "Frontend en ligne."
+          fi
+
+          attendus=$(echo "$services" | wc -l)
+          actifs=$(docker compose ps --status running --services | sort -u | wc -l)
+          if [ "$actifs" -ne "$attendus" ]; then
+            echo "::error::Conteneurs actifs : $actifs/$attendus."
+            docker compose ps
+            exit 1
+          fi
+          echo "Les $attendus services tournent."
+
+      - uses: actions/setup-python@v5
+        if: needs.circuits.result == 'success' && needs.detect.outputs.api == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        if: needs.circuits.result == 'success' && needs.detect.outputs.api == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: circuits/package-lock.json
+
+      - name: Authentification de bout en bout (preuve Groth16 réelle, consensus réel)
+        if: needs.circuits.result == 'success' && needs.detect.outputs.api == 'true'
+        run: |
+          (cd circuits && npm ci)
+          python scripts/e2e_authentication.py \
+            --api http://localhost:8000/api \
+            --wasm circuits/build/distance_js/distance.wasm \
+            --zkey circuits/build/distance.zkey
+
+      - name: Journaux des conteneurs
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --no-color --tail=200
+
+      - name: Arrêter et nettoyer
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  # ---------------------------------------------------------------------------
+  audit:
+    name: Audit des dépendances (informatif)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          for fichier in api/requirements.txt nodes/node/requirements.txt; do
+            if [ -f "$fichier" ]; then
+              echo "== $fichier"
+              pip-audit -r "$fichier" || true
+            fi
+          done
+
+      - name: npm audit
+        if: hashFiles('circuits/package-lock.json') != ''
+        working-directory: circuits
+        run: npm audit --omit=dev || true

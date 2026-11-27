@@ -1,0 +1,164 @@
+# ==============================================================================
+# FaceIN — CI Frontend
+# ==============================================================================
+# Périmètre : frontend/ (application d'authentification) et partner-demo/.
+#
+#   syntaxe-js            node --check sur tous les modules JavaScript
+#   references-statiques  Fichiers référencés par les pages HTML et par
+#                         frontend/js/config.js (scripts, styles, modèles,
+#                         circuit) ; avertissement pour les ressources CDN sans
+#                         contrôle d'intégrité (SRI)
+#   serveur-statique      Pages et ressources réellement servies en HTTP
+#
+# La cohérence cryptographique entre frontend/circuit et la clé de vérification
+# des nœuds est contrôlée par backend-ci (job tests-zkp-reel).
+# ==============================================================================
+
+name: Frontend CI
+
+on:
+  push:
+    branches: ["main", "develop", "gestion_backend"]
+    paths:
+      - "frontend/**"
+      - "partner-demo/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "partner-demo/**"
+      - ".github/workflows/frontend-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  syntaxe-js:
+    name: Syntaxe JavaScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: node --check
+        run: |
+          fichiers=$(git ls-files 'frontend/js/*.js' 'partner-demo/js/*.js')
+          if [ -z "$fichiers" ]; then echo "Aucun module JavaScript."; exit 0; fi
+          for fichier in $fichiers; do
+            echo "-> $fichier"
+            node --check "$fichier"
+          done
+
+  # ---------------------------------------------------------------------------
+  references-statiques:
+    name: Références des pages et de la configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Vérifier les fichiers référencés
+        run: |
+          pages=$(git ls-files 'frontend/*.html' 'partner-demo/*.html')
+          if [ -z "$pages" ]; then echo "Aucune page HTML."; exit 0; fi
+          python - $pages <<'EOF'
+          import os, re, sys
+          from html.parser import HTMLParser
+
+          class Refs(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.refs, self.externes = [], []
+
+              def handle_starttag(self, tag, attrs):
+                  a = dict(attrs)
+                  for cle in ("src", "href"):
+                      v = a.get(cle)
+                      if not v or v.startswith(("#", "mailto:", "data:")):
+                          continue
+                      if v.startswith(("http://", "https://", "//")):
+                          charge = tag == "script" or (tag == "link" and "stylesheet" in (a.get("rel") or ""))
+                          if charge and "integrity" not in a:
+                              self.externes.append(v)
+                          continue
+                      self.refs.append(v.split("?")[0].split("#")[0])
+
+          erreurs = 0
+          for page in sys.argv[1:]:
+              base = os.path.dirname(page)
+              p = Refs()
+              p.feed(open(page, encoding="utf-8").read())
+              for ref in p.refs:
+                  if not os.path.exists(os.path.normpath(os.path.join(base, ref))):
+                      print(f"::error file={page}::Référence introuvable : {ref}")
+                      erreurs += 1
+              for ext in p.externes:
+                  print(f"::warning file={page}::Ressource externe sans contrôle d'intégrité (SRI) : {ext}")
+              print(f"{page} : {len(p.refs)} référence(s) locale(s) vérifiée(s)")
+
+          config = "frontend/js/config.js"
+          if os.path.exists(config):
+              for chemin in re.findall(r'"(\./[^"]+)"', open(config, encoding="utf-8").read()):
+                  if not os.path.exists(os.path.normpath(os.path.join("frontend", chemin))):
+                      print(f"::error file={config}::Chemin configuré introuvable : {chemin}")
+                      erreurs += 1
+              print(f"{config} : chemins vérifiés")
+          sys.exit(1 if erreurs else 0)
+          EOF
+
+  # ---------------------------------------------------------------------------
+  serveur-statique:
+    name: Pages servies en HTTP
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Même serveur que le service « frontend » de docker-compose.yml
+      - name: Démarrer les serveurs statiques
+        run: |
+          if [ -d frontend ]; then (cd frontend && python -m http.server 3000 > /tmp/frontend.log 2>&1 &); fi
+          if [ -d partner-demo ]; then (cd partner-demo && python -m http.server 3001 > /tmp/partner.log 2>&1 &); fi
+          sleep 2
+
+      - name: Vérifier les ressources servies
+        run: |
+          verifier() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$1")
+            echo "$code $1"
+            [ "$code" = "200" ]
+          }
+          if [ -d frontend ]; then
+            verifier http://localhost:3000/
+            for fichier in $(git ls-files 'frontend/js/*.js' 'frontend/css/*.css' 'frontend/circuit/*' 'frontend/models/*'); do
+              verifier "http://localhost:3000/${fichier#frontend/}"
+            done
+          fi
+          if [ -d partner-demo ]; then
+            verifier http://localhost:3001/
+            for fichier in $(git ls-files 'partner-demo/js/*.js' 'partner-demo/*.css'); do
+              verifier "http://localhost:3001/${fichier#partner-demo/}"
+            done
+          fi

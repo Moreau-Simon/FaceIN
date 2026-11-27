@@ -1,0 +1,251 @@
+# ==============================================================================
+# FaceIN — CI Réseau (nœuds de vérification gRPC)
+# ==============================================================================
+# Périmètre : nodes/ (nœuds, consensus, Merkle, révocation, nonces), protocoles
+# gRPC, configuration partagée et certificats mTLS.
+#
+#   lint            flake8 (erreurs bloquantes) sur nodes/, shellcheck sur les
+#                   scripts de certificats
+#   config          noeuds.yaml chargé par config.py, compilation des .proto
+#   tests-noeuds    nodes/node/tests (consensus, réseau, Merkle, révocation,
+#                   nonces), avec couverture
+#   certificats     Génération des certificats de test, SAN, usages
+#                   serverAuth/clientAuth, expiration de la CA du dépôt
+#   reseau-docker   3 nœuds réels en mTLS (Docker) : health checks gRPC,
+#                   heartbeats « online », puis arrêt d'un nœud détecté par
+#                   les pairs
+# ==============================================================================
+
+name: Réseau CI
+
+on:
+  push:
+    branches: ["main", "develop", "gestion_backend"]
+    paths:
+      - "nodes/**"
+      - "scripts/generate-test-certs.sh"
+      - "scripts/creation_cert.*"
+      - "docker-compose.yml"
+      - ".github/workflows/reseau-ci.yml"
+  pull_request:
+    paths:
+      - "nodes/**"
+      - "scripts/generate-test-certs.sh"
+      - "scripts/creation_cert.*"
+      - "docker-compose.yml"
+      - ".github/workflows/reseau-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"   # version de l'image des nœuds (python:3.12-slim)
+  FLAKE8_VERSION: "7.3.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint Python et shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: flake8 (erreurs bloquantes)
+        run: |
+          pip install "flake8==${FLAKE8_VERSION}"
+          flake8 nodes --count --select=E9,F63,F7,F82 --show-source --statistics \
+            --exclude="*_pb2.py,*_pb2_grpc.py"
+
+      - name: shellcheck (scripts de certificats)
+        run: |
+          fichiers=$(git ls-files 'scripts/generate-test-certs.sh' 'scripts/creation_cert.sh')
+          if [ -n "$fichiers" ]; then
+            # shellcheck disable=SC2086
+            shellcheck --severity=error $fichiers
+          fi
+
+  # ---------------------------------------------------------------------------
+  config:
+    name: Configuration partagée et protocoles
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r nodes/node/requirements.txt
+
+      - name: Compiler les .proto
+        run: |
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=nodes/node --grpc_python_out=nodes/node nodes/shared/proto/*.proto
+
+      # Charge noeuds.yaml avec la même fonction que les nœuds, pour chaque
+      # identité déclarée dans docker-compose.yml.
+      - name: Charger la configuration de chaque nœud
+        working-directory: nodes/node
+        env:
+          CONFIG_PATH: ${{ github.workspace }}/nodes/shared/config/noeuds.yaml
+        run: |
+          for definition in "node-a 50051 node-b:50052,node-c:50053" \
+                            "node-b 50052 node-a:50051,node-c:50053" \
+                            "node-c 50053 node-a:50051,node-b:50052"; do
+            set -- $definition
+            NODE_ID=$1 NODE_PORT=$2 PEERS=$3 python - <<'EOF'
+          from config import charger_configuration
+          c = charger_configuration()
+          print(f"{c['node_id']} : {len(c['peers'])} pair(s), seuil de majorité {c['seuil_majorite']}")
+          assert c["seuil_majorite"] == (len(c["peers"]) + 1) // 2 + 1, "seuil de majorité inattendu"
+          EOF
+          done
+
+  # ---------------------------------------------------------------------------
+  tests-noeuds:
+    name: Tests des nœuds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r nodes/node/requirements-dev.txt pytest-cov
+
+      - name: Générer le code protobuf
+        run: |
+          python -m grpc_tools.protoc -I nodes/shared/proto \
+            --python_out=nodes/node --grpc_python_out=nodes/node nodes/shared/proto/*.proto
+
+      - name: Lancer les tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/nodes/node
+          MOCK_ZKP_VERIFICATION: "false"
+        run: |
+          mkdir -p reports
+          python -m pytest nodes/node/tests -v \
+            --junitxml=reports/junit-noeuds.xml \
+            --cov=nodes/node --cov-report=term-missing
+
+      - name: Conserver les rapports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapports-tests-noeuds
+          path: reports/
+
+  # ---------------------------------------------------------------------------
+  certificats:
+    name: Certificats mTLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Générer les certificats de test
+        run: bash scripts/generate-test-certs.sh
+
+      - name: Vérifier SAN, usages et chaîne de confiance
+        run: |
+          for service in node-a node-b node-c api-gateway; do
+            certificat="certs/${service}.crt"
+            openssl verify -CAfile certs/ca.crt -purpose sslserver -verify_hostname "$service" "$certificat"
+            openssl verify -CAfile certs/ca.crt -purpose sslclient "$certificat"
+            openssl x509 -in "$certificat" -noout -ext subjectAltName | grep -q "DNS:${service}"
+          done
+          echo "Certificats de test conformes."
+
+      # La CA du dépôt est une CA de TEST (clé privée partagée) : on signale
+      # seulement son expiration proche, elle ne doit jamais servir en production.
+      - name: Expiration de la CA du dépôt
+        if: hashFiles('nodes/infra/tls/ca.crt') != ''
+        run: |
+          openssl x509 -in nodes/infra/tls/ca.crt -noout -subject -enddate
+          if ! openssl x509 -in nodes/infra/tls/ca.crt -noout -checkend $((30*24*3600)); then
+            echo "::warning file=nodes/infra/tls/ca.crt::La CA de test expire dans moins de 30 jours (ou a expiré)."
+          fi
+
+  # ---------------------------------------------------------------------------
+  reseau-docker:
+    name: Trois nœuds réels en mTLS
+    needs: [config, certificats]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Générer les certificats de test
+        run: |
+          bash scripts/generate-test-certs.sh
+          echo "TLS_CA_CERT_HOST_PATH=./certs/ca.crt" >> "$GITHUB_ENV"
+
+      - name: Construire et démarrer les trois nœuds
+        run: docker compose up -d --build node-a node-b node-c
+
+      - name: Health checks gRPC (mTLS)
+        run: |
+          for tentative in $(seq 1 30); do
+            sains=0
+            for noeud in node-a node-b node-c; do
+              etat=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$noeud")
+              [ "$etat" = "healthy" ] && sains=$((sains + 1))
+            done
+            echo "Nœuds sains : $sains/3"
+            [ "$sains" -eq 3 ] && exit 0
+            sleep 5
+          done
+          echo "::error::Les trois nœuds ne sont pas sains après 150 s."
+          exit 1
+
+      - name: Heartbeats entre pairs
+        run: |
+          for tentative in $(seq 1 12); do
+            if [ "$(docker compose logs node-a | grep -c -- '-> online')" -ge 2 ]; then
+              echo "node-a voit ses deux pairs en ligne."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::node-a ne voit pas ses deux pairs en ligne."
+          exit 1
+
+      - name: Panne d'un nœud détectée par les pairs
+        run: |
+          docker compose stop node-c
+          for tentative in $(seq 1 12); do
+            if docker compose logs node-a | grep -qE 'node-c:50053 : online -> (suspect|offline)'; then
+              echo "Panne de node-c détectée par node-a."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::La panne de node-c n'a pas été détectée par node-a."
+          exit 1
+
+      - name: Journaux des nœuds
+        if: failure()
+        run: docker compose logs --no-color --tail=200 node-a node-b node-c
+
+      - name: Arrêter et nettoyer
+        if: always()
+        run: docker compose down -v --remove-orphans
